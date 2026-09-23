@@ -37,6 +37,15 @@ class ARInvoiceCreateView(PermissionRequiredMixin, SuccessMessageMixin, CreateVi
     permission_required = 'uniworlderp.add_arinvoice'
     success_message = "Invoice added successfully!"
 
+    def dispatch(self, request, *args, **kwargs):
+        sales_order_id = kwargs.get('sales_order_id')
+        if sales_order_id:
+            sales_order = get_object_or_404(SalesOrder, id=sales_order_id)
+            if sales_order.status != 'confirmed':
+                messages.error(request, "Only a confirmed order can be invoiced.")
+                return redirect('customer_vendor:sales_order_view', pk=sales_order.pk)
+        return super().dispatch(request, *args, **kwargs)
+
     def get_initial(self):
         initial = super().get_initial()
         sales_order_id = self.kwargs.get('sales_order_id')
@@ -196,14 +205,12 @@ class ARInvoiceUpdateView(PermissionRequiredMixin, SuccessMessageMixin, UpdateVi
         if form.is_valid() and formset.is_valid():
             self.object = form.save(commit=False)
             
-            # Check if the sales order has changed and if there's already an invoice for the new sales order
             if 'sales_order' in form.changed_data:
                 new_sales_order = form.cleaned_data['sales_order']
                 if new_sales_order and ARInvoice.objects.filter(sales_order=new_sales_order).exclude(pk=self.object.pk).exists():
                     messages.error(self.request, "An invoice already exists for the selected sales order.")
                     return self.form_invalid(form)
             
-            # Calculate total_amount
             total_amount = Decimal('0.00')
             for form in formset:
                 if form.cleaned_data and not form.cleaned_data.get('DELETE', False):
@@ -217,7 +224,6 @@ class ARInvoiceUpdateView(PermissionRequiredMixin, SuccessMessageMixin, UpdateVi
             formset.instance = self.object
             formset.save()
 
-            # messages.success(self.request, self.success_message)
             return super().form_valid(form)
         else:
             return self.form_invalid(form)
@@ -311,7 +317,6 @@ class ARInvoiceDeleteView(LoginRequiredMixin, PermissionRequiredMixin, DeleteVie
         return redirect('customer_vendor:invoice_list')
 
     def delete(self, request, *args, **kwargs):
-        # messages.success(self.request, self.success_message)
         return super(ARInvoiceDeleteView, self).delete(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
@@ -327,10 +332,10 @@ class ARInvoicePrintView(LoginRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        company = Company.objects.first()  # Assuming you have only one company
+        company = Company.objects.first()
         items = self.object.invoice_items.all()
         subtotal = sum(item.total_amount for item in items)
-        tax = subtotal * Decimal('0.0')  # 12% tax
+        tax = subtotal * Decimal('0.0')
         total = subtotal + tax
 
         context.update({

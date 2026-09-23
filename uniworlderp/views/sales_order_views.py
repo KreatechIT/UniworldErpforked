@@ -3,12 +3,20 @@
 
 from django import forms
 from django.urls import reverse
+from django.utils.http import url_has_allowed_host_and_scheme
 
 from uniworlderp import models
 from .common_imports import *
 from uniworlderp.models import ReturnSales, ReturnSalesItem, SalesOrder, SalesOrderItem, Product,StockTransaction,SalesEmployee,CustomerVendor
 from uniworlderp.forms import ReturnSalesForm, ReturnSalesItemFormSet, SalesOrderForm, SalesOrderItemFormSet, get_return_sales_item_formset
 from company.models import Company, Branch, ContactPerson
+
+
+def _safe_redirect_back(request, fallback_url):
+    next_url = request.POST.get('next')
+    if next_url and url_has_allowed_host_and_scheme(next_url, allowed_hosts={request.get_host()}, require_https=request.is_secure()):
+        return redirect(next_url)
+    return redirect(fallback_url)
 
 
 def get_stock_shortages(order):
@@ -29,6 +37,29 @@ def get_stock_shortages(order):
             )
     return shortages
 
+
+@transaction.atomic
+def confirm_sales_order(order):
+    """The single place a sales order's stock actually moves. Draft items never
+    touch stock (see SalesOrderItem in models.py), so this checks real demand
+    against real stock, creates the OUT transactions, and locks the order.
+    Raises ValidationError (with a readable message) if anything's short."""
+    shortages = get_stock_shortages(order)
+    if shortages:
+        raise ValidationError("Can't confirm - not enough stock: " + "; ".join(shortages))
+
+    for item in order.order_items.all():
+        StockTransaction.objects.create(
+            product=item.product,
+            transaction_type='OUT',
+            quantity=item.quantity,
+            reference=f"SO-{order.id}",
+            owner=order.owner,
+        )
+
+    order.status = 'confirmed'
+    order.save(update_fields=['status'])
+
 class SalesOrderListView(ListView):
     model = SalesOrder
     template_name = 'sales_order/list.html'
@@ -36,6 +67,9 @@ class SalesOrderListView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
+        self.is_admin = self.request.user.is_superuser
+        self.linked_employee = getattr(self.request.user, 'sales_employee', None) if not self.is_admin else None
+
         search_query = self.request.GET.get('search', '')
         status = self.request.GET.get('status', '')
         delivery_status = self.request.GET.get('delivery_status', '')
@@ -45,6 +79,9 @@ class SalesOrderListView(ListView):
         end_date = self.request.GET.get('end_date', '')
 
         queryset = SalesOrder.objects.all().order_by('-id')
+
+        if not self.is_admin:
+            queryset = queryset.filter(sales_employee=self.linked_employee) if self.linked_employee else queryset.none()
 
         if search_query:
             queryset = queryset.filter(
@@ -59,7 +96,7 @@ class SalesOrderListView(ListView):
             queryset = queryset.filter(delivery_status=delivery_status)
         if customer_id:
             queryset = queryset.filter(customer_id=customer_id)
-        if sales_employee_id:
+        if sales_employee_id and self.is_admin:
             queryset = queryset.filter(sales_employee_id=sales_employee_id)
         if start_date:
             queryset = queryset.filter(order_date__gte=start_date)
@@ -77,8 +114,14 @@ class SalesOrderListView(ListView):
         context['selected_sales_employee'] = self.request.GET.get('sales_employee', '')
         context['status_choices'] = SalesOrder.STATUS_CHOICES
         context['delivery_status_choices'] = SalesOrder.DELIVERY_STATUS_CHOICES
-        context['customers'] = CustomerVendor.objects.filter(entity_type='customer').order_by('name')
-        context['sales_employees'] = SalesEmployee.objects.order_by('full_name')
+
+        if self.is_admin:
+            context['customers'] = CustomerVendor.objects.filter(entity_type='customer').order_by('name')
+            context['sales_employees'] = SalesEmployee.objects.order_by('full_name')
+        else:
+            context['customers'] = CustomerVendor.objects.filter(sales_employee=self.linked_employee).order_by('name') if self.linked_employee else CustomerVendor.objects.none()
+            context['sales_employees'] = SalesEmployee.objects.filter(pk=self.linked_employee.pk) if self.linked_employee else SalesEmployee.objects.none()
+
         return context
 class SalesOrderItemDetailedListView(ListView):
     model = SalesOrderItem
@@ -147,14 +190,12 @@ class SalesOrderCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateVi
                     formset.instance = self.object
                     formset.save()
                     if self.request.POST.get('action') == 'confirm':
-                        shortages = get_stock_shortages(self.object)
-                        if shortages:
-                            messages.error(self.request, "Can't confirm - not enough stock: " + "; ".join(shortages))
-                            messages.success(self.request, 'Sales Order saved as draft instead.')
-                        else:
-                            self.object.status = 'confirmed'
-                            self.object.save(update_fields=['status'])
+                        try:
+                            confirm_sales_order(self.object)
                             messages.success(self.request, 'Sales Order created and confirmed successfully.')
+                        except ValidationError as e:
+                            messages.error(self.request, ', '.join(e.messages))
+                            messages.success(self.request, 'Sales Order saved as draft instead.')
                     else:
                         messages.success(self.request, 'Sales Order saved as draft.')
                 return super().form_valid(form)
@@ -327,14 +368,12 @@ class SalesOrderUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateVi
             print("="*80 + "\n")
 
             if self.request.POST.get('action') == 'confirm':
-                shortages = get_stock_shortages(self.object)
-                if shortages:
-                    messages.error(self.request, "Can't confirm - not enough stock: " + "; ".join(shortages))
-                    messages.success(self.request, 'Sales Order saved as draft instead.')
-                else:
-                    self.object.status = 'confirmed'
-                    self.object.save(update_fields=['status'])
+                try:
+                    confirm_sales_order(self.object)
                     messages.success(self.request, 'Sales Order confirmed successfully.')
+                except ValidationError as e:
+                    messages.error(self.request, ', '.join(e.messages))
+                    messages.success(self.request, 'Sales Order saved as draft instead.')
             else:
                 messages.success(self.request, 'Sales Order saved as draft.')
 
@@ -456,9 +495,10 @@ class SalesOrderCancelView(LoginRequiredMixin, PermissionRequiredMixin, View):
     @transaction.atomic
     def post(self, request, pk):
         order = get_object_or_404(SalesOrder, pk=pk)
+        fallback = reverse('customer_vendor:sales_order_list')
         if order.status != 'confirmed':
             messages.error(request, "Only a confirmed order can be cancelled.")
-            return redirect('customer_vendor:sales_order_view', pk=order.pk)
+            return _safe_redirect_back(request, fallback)
 
         for item in order.order_items.all():
             StockTransaction.objects.create(
@@ -472,7 +512,7 @@ class SalesOrderCancelView(LoginRequiredMixin, PermissionRequiredMixin, View):
         order.status = 'cancelled'
         order.save(update_fields=['status'])
         messages.success(request, f"Sales Order #{order.id} has been cancelled and its stock returned.")
-        return redirect('customer_vendor:sales_order_view', pk=order.pk)
+        return _safe_redirect_back(request, fallback)
 
 @method_decorator(require_POST, name='dispatch')
 class SalesOrderConfirmView(LoginRequiredMixin, PermissionRequiredMixin, View):
@@ -491,14 +531,11 @@ class SalesOrderConfirmView(LoginRequiredMixin, PermissionRequiredMixin, View):
             messages.error(request, "Only a draft order can be confirmed.")
             return redirect('customer_vendor:sales_order_view', pk=order.pk)
 
-        shortages = get_stock_shortages(order)
-        if shortages:
-            messages.error(request, "Can't confirm - not enough stock: " + "; ".join(shortages))
-            return redirect('customer_vendor:sales_order_view', pk=order.pk)
-
-        order.status = 'confirmed'
-        order.save(update_fields=['status'])
-        messages.success(request, f"Sales Order #{order.id} confirmed successfully.")
+        try:
+            confirm_sales_order(order)
+            messages.success(request, f"Sales Order #{order.id} confirmed successfully.")
+        except ValidationError as e:
+            messages.error(request, ', '.join(e.messages))
         return redirect('customer_vendor:sales_order_view', pk=order.pk)
 
 class SalesOrderPrintView(LoginRequiredMixin, DetailView):
@@ -538,7 +575,13 @@ class ReturnSalesCreateView(LoginRequiredMixin,PermissionRequiredMixin, CreateVi
         super().setup(request, *args, **kwargs)
         self.sales_order_id = kwargs.get('sales_order_id')
         self.sales_order = get_object_or_404(SalesOrder, id=self.sales_order_id)
-    
+
+    def dispatch(self, request, *args, **kwargs):
+        if self.sales_order.status != 'confirmed':
+            messages.error(request, "Only a confirmed order can have a return created.")
+            return redirect('customer_vendor:sales_order_view', pk=self.sales_order.pk)
+        return super().dispatch(request, *args, **kwargs)
+
     def get_success_url(self):
         return reverse_lazy('customer_vendor:stock_transfer_detailed_list')
     

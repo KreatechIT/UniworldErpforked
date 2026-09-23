@@ -125,6 +125,7 @@
                                             <form method="post" action="{% url 'customer_vendor:sales_order_cancel' sales_order.pk %}" class="inline"
                                                   onsubmit="return appConfirmSubmit(event, this, 'This will cancel the confirmed order and return its stock. Continue?', {title: 'Cancel Sales Order', confirmText: 'Cancel Order'});">
                                                 {% csrf_token %}
+                                                <input type="hidden" name="next" value="{{ request.get_full_path }}">
                                                 <button type="submit"
                                                         class="px-2 py-1 text-xs font-semibold rounded-full bg-orange-800 text-orange-100 hover:bg-orange-700">
                                                     <i class="ri-close-circle-line mr-1"></i>Cancel
@@ -135,40 +136,46 @@
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap">
                                         <div class="flex items-center space-x-2">
-                                            {% if not sales_order.invoice %}
-                                                {% if perms.uniworlderp.add_arinvoice %}
-                                                    <a href="{% url 'customer_vendor:invoice_create_from_sales_order' sales_order.pk %}" 
-                                                       class="px-2 py-1 text-xs font-semibold rounded-full bg-green-800 text-green-100 hover:bg-green-700">
-                                                        <i class="ri-file-add-line mr-1"></i>Create Invoice
-                                                    </a>
-                                                {% else %}
-                                                    <span class="px-2 py-1 text-xs font-semibold rounded-full bg-red-800 text-red-100">
-                                                        <i class="ri-close-circle-fill mr-1"></i>Not Created
-                                                    </span>
-                                                {% endif %}
-                                            {% else %}
-                                                <a href="{% url 'customer_vendor:invoice_view' sales_order.invoice.pk %}" 
+                                            {% if sales_order.invoice %}
+                                                <a href="{% url 'customer_vendor:invoice_view' sales_order.invoice.pk %}"
                                                    class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-800 text-blue-100 hover:bg-blue-700">
                                                     <i class="ri-file-list-3-line mr-1"></i>View Invoice
                                                 </a>
-                                                <a href="{% url 'customer_vendor:invoice_print' sales_order.invoice.pk %}" 
+                                                <a href="{% url 'customer_vendor:invoice_print' sales_order.invoice.pk %}"
                                                    class="px-2 py-1 text-xs font-semibold rounded-full bg-yellow-800 text-yellow-100 hover:bg-yellow-700">
                                                     <i class="ri-printer-line mr-1"></i>Print Invoice
                                                 </a>
+                                            {% elif sales_order.status != 'confirmed' %}
+                                                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-gray-700 text-gray-300">
+                                                    {% if sales_order.status == 'cancelled' %}Cancelled{% else %}Not Confirmed{% endif %}
+                                                </span>
+                                            {% elif perms.uniworlderp.add_arinvoice %}
+                                                <a href="{% url 'customer_vendor:invoice_create_from_sales_order' sales_order.pk %}"
+                                                   class="px-2 py-1 text-xs font-semibold rounded-full bg-green-800 text-green-100 hover:bg-green-700">
+                                                    <i class="ri-file-add-line mr-1"></i>Create Invoice
+                                                </a>
+                                            {% else %}
+                                                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-red-800 text-red-100">
+                                                    <i class="ri-close-circle-fill mr-1"></i>Not Created
+                                                </span>
                                             {% endif %}
                                         </div>
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap">
                                         <div class="flex space-x-2">
-                                            {% if not sales_order.returns.exists  %}
-                                                <a href="{% url 'customer_vendor:sales_order_return' sales_order.pk %}" 
-                                                class="px-2 py-1 text-xs font-semibold rounded-full bg-green-800 text-green-100 hover:bg-green-700">
-                                                    <i class="ri-arrow-go-back-line mr-1"></i>Create Return
-                                                </a>
-                                            {% else %}
-                                                <a href="{% url 'customer_vendor:sales_order_view_return' sales_order.pk %}" 
+                                            {% if sales_order.returns.exists %}
+                                                <a href="{% url 'customer_vendor:sales_order_view_return' sales_order.pk %}"
                                                 class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-800 text-blue-100 hover:bg-blue-700">
                                                     <i class="ri-file-list-3-line mr-1"></i>View Return
+                                                </a>
+                                            {% elif sales_order.status != 'confirmed' %}
+                                                <span class="px-2 py-1 text-xs font-semibold rounded-full bg-gray-700 text-gray-300">
+                                                    {% if sales_order.status == 'cancelled' %}Cancelled{% else %}Not Confirmed{% endif %}
+                                                </span>
+                                            {% else %}
+                                                <a href="{% url 'customer_vendor:sales_order_return' sales_order.pk %}"
+                                                class="px-2 py-1 text-xs font-semibold rounded-full bg-green-800 text-green-100 hover:bg-green-700">
+                                                    <i class="ri-arrow-go-back-line mr-1"></i>Create Return
                                                 </a>
                                             {% endif %}
                                         </div>
