@@ -13,7 +13,8 @@
 
             <!-- Card Content -->
             <div class="p-6 space-y-6">
-                <form method="post" enctype="multipart/form-data" class="space-y-6">
+                <form method="post" enctype="multipart/form-data" class="space-y-6"
+                      data-lock-fields="{% if action == 'Add' and form.sales_order.value %}true{% else %}false{% endif %}">
             {% csrf_token %}
             {% include "message.html" %}
             {% if form.non_field_errors %}
@@ -75,7 +76,9 @@
                                 <th scope="col" class="py-3 text-center text-xs font-semibold uppercase tracking-wider">Quantity</th>
                                 <th scope="col" class="py-3 text-center text-xs font-semibold uppercase tracking-wider">Sales Price</th>
                                 <th scope="col" class="py-3 text-center text-xs font-semibold uppercase tracking-wider">Total</th>
+                                {% if action != 'Add' or not form.sales_order.value %}
                                 <th scope="col" class="py-3 text-left text-xs font-semibold uppercase tracking-wider">Delete</th>
+                                {% endif %}
                             </tr>
                         </thead>
                         <tbody id="orderItemsFormset" class="divide-y divide-[hsl(var(--border))]">
@@ -123,6 +126,7 @@
                                             </div>
                                         {% endif %}
                                     </td>
+                                    {% if action != 'Add' or not form.sales_order.value %}
                                     <td class="py-2 relative">
                                         {{ form.DELETE }}
                                         <button type="button" class="delete-row opacity-0 group-hover:opacity-100 transition-opacity duration-150 inline-flex items-center justify-center rounded-full w-6 h-6 bg-red-500 text-white hover:bg-red-600">
@@ -131,18 +135,21 @@
                                             </svg>
                                         </button>
                                     </td>
+                                    {% endif %}
                                 </tr>
                             {% endfor %}
                         </tbody>
                     </table>
                 </div>
 
+                {% if action != 'Add' or not form.sales_order.value %}
                 <!-- Single Add Row Button that works for both mobile and desktop -->
                 <div class="mt-4">
                     <button type="button" id="addRowBtn" class="w-full px-4 py-2 bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] rounded-full hover:bg-opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[hsl(var(--ring))]">
                         <span class="mr-2">+</span> Add New Row
                     </button>
                 </div>
+                {% endif %}
             </div>
                     <!-- Form Actions -->
                     <div class="flex justify-end space-x-4 mt-6">
@@ -188,8 +195,17 @@
         const contextMenu = document.getElementById('contextMenu');
         let targetRow = null;
 
+        // When this invoice is being created from a sales order, every field (customer,
+        // sales employee, product, quantity, price...) is locked to what the order says -
+        // none of the row add/delete/context-menu editing below applies in that case.
+        const invoiceForm = document.querySelector('form[data-lock-fields]');
+        const lockFields = invoiceForm && invoiceForm.dataset.lockFields === 'true';
+
+        if (!lockFields) {
         // Add row functionality
-        addRowBtn.addEventListener('click', () => addFormsetRow());
+        if (addRowBtn) {
+            addRowBtn.addEventListener('click', () => addFormsetRow());
+        }
 
         // Delete row functionality
         orderItemsFormset.addEventListener('click', function(e) {
@@ -223,6 +239,26 @@
                 hideContextMenu();
             }
         });
+        } else {
+            // Lock every field derived from the sales order: disable it for display, and
+            // mirror its current value into a hidden input so it still posts on submit
+            // (a disabled field's value is never sent by the browser).
+            const fieldsToLock = invoiceForm.querySelectorAll('.grid select, .grid input:not([type="hidden"])');
+            fieldsToLock.forEach(lockField);
+
+            const itemFields = orderItemsFormset.querySelectorAll('select[name$="-product"], input[name$="-quantity"], input[name$="-unit_price"]');
+            itemFields.forEach(lockField);
+        }
+
+        function lockField(el) {
+            const mirror = document.createElement('input');
+            mirror.type = 'hidden';
+            mirror.name = el.name;
+            mirror.value = el.value;
+            el.insertAdjacentElement('afterend', mirror);
+            el.disabled = true;
+            el.classList.add('opacity-70', 'cursor-not-allowed');
+        }
 
         // Calculate total on input change
         orderItemsFormset.addEventListener('input', updateTotal);

@@ -100,7 +100,9 @@
                                         <th scope="col" class="py-3 text-center text-xs font-semibold uppercase tracking-wider">Unit Price</th>
                                         <th scope="col" class="py-3 text-center text-xs font-semibold uppercase tracking-wider">Discount</th>
                                         <th scope="col" class="py-3 text-center text-xs font-semibold uppercase tracking-wider">Total</th>
+                                        {% if action != 'View' %}
                                         <th scope="col" class="py-3 text-left text-xs font-semibold uppercase tracking-wider">Delete</th>
+                                        {% endif %}
                                     </tr>
                                 </thead>
                                 <tbody id="orderItemsFormset" class="divide-y divide-[hsl(var(--border))]">
@@ -161,6 +163,7 @@
                                                     </div>
                                                 {% endif %}
                                             </td>
+                                            {% if action != 'View' %}
                                             <td class="py-2 relative">
                                                 {{ form.DELETE }}
                                                 <button type="button" class="delete-row opacity-0 group-hover:opacity-100 transition-opacity duration-150 inline-flex items-center justify-center rounded-full w-6 h-6 bg-red-500 text-white hover:bg-red-600">
@@ -169,18 +172,21 @@
                                                     </svg>
                                                 </button>
                                             </td>
+                                            {% endif %}
                                         </tr>
                                     {% endfor %}
                                 </tbody>
                             </table>
                         </div>
 
+                        {% if action != 'View' %}
                         <!-- Single Add Row Button that works for both mobile and desktop -->
                         <div class="mt-4">
                             <button type="button" id="addRowBtn" class="w-full px-4 py-2 bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] rounded-full hover:bg-opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[hsl(var(--ring))]">
                                 <span class="mr-2">+</span> Add New Row
                             </button>
                         </div>
+                        {% endif %}
                     </div>
 
                     <!-- Financial Information Section -->
@@ -265,6 +271,7 @@
 {% block extra_js %}
 <script>
     document.addEventListener('DOMContentLoaded', function() {
+    const isViewMode = {% if action == 'View' %}true{% else %}false{% endif %};
     const orderItemsFormset = document.getElementById('orderItemsFormset');
     const addRowBtn = document.getElementById('addRowBtn');
     const contextMenu = document.getElementById('contextMenu');
@@ -281,8 +288,12 @@
         orderDateField.value = `${year}-${month}-${day}`;
     }
 
-    // Initialize searchable dropdown only for product fields
-    initializeSearchableDropdowns();
+    // Initialize searchable dropdown only for product fields (skipped in read-only View
+    // mode - the custom dropdown lets a user click a new value regardless of the native
+    // select's disabled attribute, so it must not be wired up when the order is locked)
+    if (!isViewMode) {
+        initializeSearchableDropdowns();
+    }
 
     // Non-admin users: only show customers assigned to the selected sales employee
     const restrictCustomers = document.querySelector('form[data-restrict-customers]')?.dataset.restrictCustomers === 'true';
@@ -315,8 +326,14 @@
     // On load, keep an existing order's customer as-is
     filterCustomersByEmployee(false);
 
+    // Add/delete row and the right-click context menu are edit-only actions - none of
+    // this should be wired up in read-only View mode (a confirmed/cancelled order can't
+    // be touched, and these controls act on the DOM directly regardless of disabled inputs)
+    if (!isViewMode) {
     // Add row functionality
-    addRowBtn.addEventListener('click', () => addFormsetRow());
+    if (addRowBtn) {
+        addRowBtn.addEventListener('click', () => addFormsetRow());
+    }
 
     // Delete row functionality
     orderItemsFormset.addEventListener('click', function(e) {
@@ -350,6 +367,7 @@
             hideContextMenu();
         }
     });
+    }
 
     // Calculate total on input change
     orderItemsFormset.addEventListener('input', function(e) {
