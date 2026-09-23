@@ -37,6 +37,14 @@ class CustomerVendor(models.Model):
     )
 
     entity_type = models.CharField(max_length=10, choices=ENTITY_TYPE_CHOICES, default='customer')
+    sales_employee = models.ForeignKey(
+        'SalesEmployee',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='customers',
+        verbose_name='Sales Employee'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='customer_vendors')
@@ -79,31 +87,29 @@ class SalesEmployee(models.Model):
         null=True, 
         blank=True
     )
-    full_name = models.CharField(max_length=255, blank=True, null=True)  # New field for full name
+    full_name = models.CharField(max_length=255, blank=True, null=True)
     
-    email = models.EmailField(max_length=255, blank=True, null=True)  # New optional email field
+    email = models.EmailField(max_length=255, blank=True, null=True)
     
     phone_number = models.CharField(max_length=15, blank=True, null=True)
     address = models.TextField(blank=True, null=True)
     city = models.CharField(max_length=100, blank=True, null=True)
-    state = models.CharField(max_length=100, blank=True, null=True)  # State or region
-    country = models.CharField(max_length=100, blank=True, null=True)  # Country
+    state = models.CharField(max_length=100, blank=True, null=True)
+    country = models.CharField(max_length=100, blank=True, null=True)
 
-    date_of_joining = models.DateField(blank=True, null=True)  # Joining date
-    sales_target = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)  # Monthly sales target
-    sales_achieved = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)  # Sales achieved
+    date_of_joining = models.DateField(blank=True, null=True)
+    sales_target = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
+    sales_achieved = models.DecimalField(max_digits=10, decimal_places=2, blank=True, null=True)
 
-    # Administrative fields
-    is_active = models.BooleanField(default=True)  # Employee active/inactive status
-    notes = models.TextField(blank=True, null=True)  # Additional notes or remarks
-    profile_picture = models.ImageField(upload_to='sales_employee_pictures/', blank=True, null=True)  # Profile image
+    is_active = models.BooleanField(default=True)
+    notes = models.TextField(blank=True, null=True)
+    profile_picture = models.ImageField(upload_to='sales_employee_pictures/', blank=True, null=True)
               
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='sales_employee_owner',default=None,blank=True,null=True)
 
     def save(self, *args, **kwargs):
-        # Check if an authenticated user is available
         request = kwargs.pop('request', None)
         if request and request.user.is_authenticated:
             self.owner = request.user
@@ -171,7 +177,7 @@ class Product(models.Model):
     class Meta:
         verbose_name = 'Product'
         verbose_name_plural = 'Products'
-        ordering = ['name']  # Alphabetical ordering by name
+        ordering = ['name']
         indexes = [
             models.Index(fields=['name', 'price']),
         ]
@@ -199,15 +205,11 @@ class StockTransaction(models.Model):
 
     def save(self, *args, **kwargs):
         with transaction.atomic():
-            # Check if this is a new transaction (not an update)
-            is_new = self._state.adding  # True only when inserting into DB for first time
+            is_new = self._state.adding
             
             if is_new:
-                # Only update stock for new transactions
-                # Capture previous stock before the transaction
                 self.previous_stock = self.product.stock_quantity
                 
-                # Calculate the new stock quantity after the transaction
                 if self.transaction_type == 'IN':
                     self.current_stock = self.product.stock_quantity + self.quantity
                 elif self.transaction_type == 'OUT':
@@ -217,14 +219,11 @@ class StockTransaction(models.Model):
                 elif self.transaction_type == 'RET':
                     self.current_stock = self.product.stock_quantity + self.quantity
                 
-                # Save the transaction record with previous and current stock
                 super().save(*args, **kwargs)
                 
-                # Update the product's stock quantity
                 self.product.stock_quantity = self.current_stock
                 self.product.save()
             else:
-                # For updates, just save the transaction record without modifying stock
                 super().save(*args, **kwargs)
 
     class Meta:
@@ -258,7 +257,6 @@ class SalesOrder(models.Model):
 
     def update_total_amount(self):
         subtotal = sum(item.total for item in self.order_items.all())
-        # Calculate final total: subtotal - discount + shipping
         old_total = self.total_amount
         self.total_amount = subtotal - self.discount + self.shipping
         print(f"      [MODEL] Updating Sales Order Total: Old={old_total}, New={self.total_amount}, Subtotal={subtotal}, Discount={self.discount}, Shipping={self.shipping}")
@@ -275,15 +273,11 @@ class SalesOrder(models.Model):
         super().save(*args, **kwargs)
 
     def delete(self, *args, **kwargs):
-        # Delete each item individually to trigger their custom delete methods
         for item in self.order_items.all():
             item.delete()
-        # Then delete the sales order itself
         super().delete(*args, **kwargs)
     def clean(self):
         super().clean()
-        # if self.sales_employee and self.sales_employee.is_active is False:
-        #     raise ValidationError(_("The selected sales employee is not active."))
 
 
     class Meta:
@@ -320,8 +314,6 @@ class SalesOrderItem(models.Model):
     def __str__(self):
         return f"{self.product.name} - {self.quantity} x {self.unit_price}"
 
-    # def calculate_total_price(self):
-    #     return Decimal(self.quantity) * self.unit_price
     
     def calculate_total_price(self):
         if self.product.discount_amount and self.product.discount_amount > 0:
@@ -341,10 +333,8 @@ class SalesOrderItem(models.Model):
         if not self.product_id:
             raise ValidationError(_("Product must be selected."))
         
-        # Only validate stock availability for new items or when increasing quantity
         is_new = self.pk is None
         if is_new:
-            # For new items, check if there's enough stock
             if self.product.stock_quantity < self.quantity:
                 raise ValidationError({
                     'quantity': _("Insufficient stock for %(product)s. Available: %(available)d, requested: %(requested)d") % {
@@ -354,7 +344,6 @@ class SalesOrderItem(models.Model):
                     }
                 })
         elif not is_new:
-            # For existing items, only validate if quantity is being increased
             try:
                 old_item = SalesOrderItem.objects.get(pk=self.pk)
                 if old_item.quantity < self.quantity and self.product.stock_quantity < (self.quantity - old_item.quantity):
@@ -366,7 +355,6 @@ class SalesOrderItem(models.Model):
                         }
                     })
             except SalesOrderItem.DoesNotExist:
-                # If the item doesn't exist, treat it as a new item
                 if self.product.stock_quantity < self.quantity:
                     raise ValidationError({
                         'quantity': _("Insufficient stock for %(product)s. Available: %(available)d, requested: %(requested)d") % {
@@ -389,7 +377,6 @@ class SalesOrderItem(models.Model):
                 is_new = self.pk is None
                 self.clean()
                 
-                # Check if this is a new item or if quantity has changed
                 quantity_changed = False
                 if not is_new:
                     old_item = SalesOrderItem.objects.get(pk=self.pk)
@@ -403,14 +390,10 @@ class SalesOrderItem(models.Model):
 
                 super().save(*args, **kwargs)
 
-                # Only create stock transaction if quantity has changed
                 if quantity_changed and quantity_diff != 0:
-                    # Determine transaction type based on quantity change and context
                     if quantity_diff > 0:
-                        # Quantity increased - stock goes out
                         transaction_type = 'OUT'
                     else:
-                        # Quantity decreased - return excess stock using 'RET' type per Requirement 5.4
                         transaction_type = 'RET' if not is_new else 'IN'
                 
                     print(f"      [MODEL] Creating StockTransaction: Type={transaction_type}, Qty={abs(quantity_diff)}")
@@ -599,7 +582,7 @@ class ARInvoiceItem(models.Model):
     def save(self, *args, **kwargs):
         self.total_amount = self.unit_price * self.quantity
         super().save(*args, **kwargs)
-        self.ar_invoice.save()  # Update the invoice total
+        self.ar_invoice.save()
 
     def __str__(self):
         return f"{self.product.name} - {self.quantity} x {self.unit_price}"
@@ -641,7 +624,6 @@ class MaterialsPurchaseItem(models.Model):
         super().save(*args, **kwargs)
 
 
-#Return Sales
 
 class ReturnSales(models.Model):
     id = models.BigAutoField(primary_key=True)
@@ -695,7 +677,6 @@ class ReturnSalesItem(models.Model):
         if not self.sales_order_item_id:
             raise ValidationError(_("Sales order item must be selected."))
         
-        # Check if return quantity doesn't exceed original quantity
         previously_returned = ReturnSalesItem.objects.filter(
             sales_order_item=self.sales_order_item
         ).exclude(id=self.id).aggregate(total=Sum('quantity'))['total'] or 0
@@ -712,14 +693,12 @@ class ReturnSalesItem(models.Model):
     def save(self, *args, **kwargs):
         try:
             with transaction.atomic():
-                # Skip processing if quantity is zero
                 if self.quantity == 0:
                     return self
                 
                 is_new = self.pk is None
                 self.clean()
                 
-                # Calculate the total field before saving
                 self.total = self.calculate_total_price()
                 
                 if not is_new:
@@ -731,8 +710,6 @@ class ReturnSalesItem(models.Model):
                 super().save(*args, **kwargs)
                 
                 if quantity_diff != 0:
-                    # Create stock transaction for the return
-                    # Get owner from the sales order since ReturnSales doesn't have owner field
                     owner = self.sales_order_item.sales_order.owner
                     StockTransaction.objects.create(
                         product=self.sales_order_item.product,

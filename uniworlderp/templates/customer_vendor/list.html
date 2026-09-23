@@ -41,6 +41,13 @@
                         </option>
                     {% endfor %}
                 </select>
+                <select name="sales_employee" class="py-2 px-3 border border-[hsl(var(--border))] rounded-md focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:w-44 sm:text-sm bg-[hsl(var(--background))]">
+                    <option value="">All Employees</option>
+                    <option value="none" {% if sales_employee == 'none' %}selected{% endif %}>Unassigned</option>
+                    {% for emp in sales_employees %}
+                        <option value="{{ emp.pk }}" {% if sales_employee == emp.pk|stringformat:'s' %}selected{% endif %}>{{ emp }}</option>
+                    {% endfor %}
+                </select>
                 <select name="city" id="city-filter" class="py-2 px-3 border border-[hsl(var(--border))] rounded-md focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:w-36 sm:text-sm bg-[hsl(var(--background))]">
                     <option value="">All Cities</option>
                     {% for c in cities %}
@@ -78,6 +85,7 @@
                                     <th scope="col" class="px-6 py-3 cursor-pointer">Email</th>
                                     <th scope="col" class="px-6 py-3 cursor-pointer">Phone Number</th>
                                     <th scope="col" class="px-6 py-3 cursor-pointer">Business Type</th>
+                                    <th scope="col" class="px-6 py-3 cursor-pointer">Sales Employee</th>
                                     <th scope="col" class="px-6 py-3 cursor-pointer">City</th>
                                     <th scope="col" class="px-6 py-3 cursor-pointer">Area</th>
                                     <th scope="col" class="px-6 py-3 cursor-pointer">Total Sales</th>
@@ -95,6 +103,7 @@
                                     <td class="px-6 py-4">{{ customer.email|default:"N/A" }}</td>
                                     <td class="px-6 py-4">{{ customer.phone_number }}</td>
                                     <td class="px-6 py-4">{{ customer.get_business_type_display }}</td>
+                                    <td class="px-6 py-4">{{ customer.sales_employee|default:"-" }}</td>
                                     <td class="px-6 py-4">{{ customer.city|default:"-" }}</td>
                                     <td class="px-6 py-4">{{ customer.area|default:"-" }}</td>
                                     <td class="px-6 py-4">{{ customer.total_sales|floatformat:2 }}</td>
@@ -133,7 +142,7 @@
                                 </tr>
                                 {% empty %}
                                 <tr>
-                                    <td colspan="10" class="px-6 py-4 text-center text-sm text-gray-400">No customers available.</td>
+                                    <td colspan="11" class="px-6 py-4 text-center text-sm text-gray-400">No customers available.</td>
                                 </tr>
                                 {% endfor %}
                             </tbody>

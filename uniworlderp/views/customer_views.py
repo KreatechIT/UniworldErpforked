@@ -1,5 +1,4 @@
 
-# customer_views.py
 
 
 from .common_imports import *
@@ -9,11 +8,10 @@ from django.db.models import Sum, F, Value, DecimalField
 from company.models import Company
 from django.db.models.functions import Coalesce
 
-from uniworlderp.models import CustomerVendor, SalesOrder, ARInvoice,PurchaseOrder
+from uniworlderp.models import CustomerVendor, SalesOrder, ARInvoice,PurchaseOrder, SalesEmployee
 from uniworlderp.forms import CustomerVendorForm
 
 
-# Matches placeholder phone numbers like '000-000-0000', '0000000000', '', '-', etc.
 NO_MOBILE_REGEX = r'^[0\-\s]*$'
 
 
@@ -32,7 +30,6 @@ def get_customer_city_area_map():
     for city, area in rows:
         city_area_map.setdefault(city, set()).add(area)
 
-    # Also include cities that have no area set at all, so they still appear
     for city in (
         CustomerVendor.objects
         .exclude(city__isnull=True).exclude(city='')
@@ -56,9 +53,9 @@ class CustomerVendorListView(ListView):
         business_type = self.request.GET.get('business_type', '')
         city = self.request.GET.get('city', '')
         area = self.request.GET.get('area', '')
-        queryset = CustomerVendor.objects.all()
+        sales_employee = self.request.GET.get('sales_employee', '')
+        queryset = CustomerVendor.objects.select_related('sales_employee')
 
-        # Search filtering
         if search_query:
             queryset = queryset.filter(
                 Q(name__icontains=search_query) |
@@ -67,21 +64,22 @@ class CustomerVendorListView(ListView):
                 Q(address__icontains=search_query)
             )
 
-        # Entity type filtering
         if entity_type:
             queryset = queryset.filter(entity_type=entity_type)
 
-        # Business type filtering
         if business_type:
             queryset = queryset.filter(business_type=business_type)
 
-        # City / Area filtering
+        if sales_employee == 'none':
+            queryset = queryset.filter(sales_employee__isnull=True)
+        elif sales_employee.isdigit():
+            queryset = queryset.filter(sales_employee_id=sales_employee)
+
         if city:
             queryset = queryset.filter(city=city)
             if area:
                 queryset = queryset.filter(area=area)
 
-        # Annotate with total sales and total invoices
         queryset = queryset.annotate(
             total_sales=Coalesce(Sum('sales_orders__total_amount', output_field=DecimalField(max_digits=10, decimal_places=2)), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2))),
             total_invoices=Coalesce(Sum('ar_invoices__total_amount', output_field=DecimalField(max_digits=10, decimal_places=2)), Value(0, output_field=DecimalField(max_digits=10, decimal_places=2)))
@@ -95,6 +93,8 @@ class CustomerVendorListView(ListView):
         context['entity_type'] = self.request.GET.get('entity_type', '')
         context['business_type'] = self.request.GET.get('business_type', '')
         context['business_type_choices'] = CustomerVendor.BUSINESS_TYPE_CHOICES
+        context['sales_employee'] = self.request.GET.get('sales_employee', '')
+        context['sales_employees'] = SalesEmployee.objects.order_by('full_name')
 
         city = self.request.GET.get('city', '')
         area = self.request.GET.get('area', '')
@@ -104,7 +104,6 @@ class CustomerVendorListView(ListView):
         context['cities'] = sorted(context['city_area_map'].keys())
         context['areas'] = context['city_area_map'].get(city, [])
 
-        # Preserve current filters for the "Print List" link and pagination links
         filter_params = self.request.GET.copy()
         filter_params.pop('page', None)
         context['print_query_string'] = filter_params.urlencode()
@@ -127,9 +126,26 @@ class CustomerVendorCreateView(PermissionRequiredMixin, SuccessMessageMixin, Cre
         messages.error(self.request, "You do not have permission to add a customer/vendor.")
         return redirect('customer_vendor:customer_list')
 
+    def get_initial(self):
+        initial = super().get_initial()
+        sales_employee_id = self.request.GET.get('sales_employee')
+        if sales_employee_id:
+            initial['sales_employee'] = sales_employee_id
+        return initial
+
     def form_valid(self, form):
         form.instance.owner = self.request.user
+        if not form.instance.sales_employee_id:
+            sales_employee_id = self.request.GET.get('sales_employee')
+            if sales_employee_id:
+                form.instance.sales_employee_id = sales_employee_id
         return super().form_valid(form)
+
+    def get_success_url(self):
+        sales_employee_id = self.request.GET.get('sales_employee')
+        if sales_employee_id:
+            return reverse_lazy('customer_vendor:sales_employee_customers', kwargs={'pk': sales_employee_id})
+        return str(self.success_url)
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
@@ -268,7 +284,7 @@ class CustomerVendorPrintView(LoginRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        company = Company.objects.first()  # Assuming you have only one company
+        company = Company.objects.first()
         context.update({
             'company': company,
         })

@@ -16,15 +16,16 @@ urlpatterns = [
     path('customers-vendors/<uuid:pk>/sales-orders/', customer_views.SalesOrderListView.as_view(), name='sales_order_list'),
     path('customers-vendors/<uuid:pk>/purchase-orders/', customer_views.PurchaseOrderListView.as_view(), name='purchase_order_list'),
     path('customers-vendors/<uuid:pk>/invoices/', customer_views.InvoiceListView.as_view(), name='invoice_list'),
-    # SalesEmployee URLs
     path('sales-employees/', sales_employee_views.SalesEmployeeListView.as_view(), name='sales_employee_list'),
     path('sales-employees/create/', sales_employee_views.SalesEmployeeCreateView.as_view(), name='sales_employee_create'),
     path('sales-employees/edit/<int:pk>/', sales_employee_views.SalesEmployeeUpdateView.as_view(), name='sales_employee_edit'),
     path('sales-employees/delete/<int:pk>/', sales_employee_views.SalesEmployeeDeleteView.as_view(), name='sales_employee_delete'),
     path('sales-employees/print/<int:pk>/', sales_employee_views.SalesEmployeePrintView.as_view(), name='sales_employee_print'),
     path('sales-employees/view/<int:pk>/', sales_employee_views.SalesEmployeeDetailView.as_view(), name='sales_employee_view'),
+    path('sales-employees/<int:pk>/customers/', sales_employee_views.SalesEmployeeCustomerListView.as_view(), name='sales_employee_customers'),
+    path('sales-employees/<int:pk>/customers/assign/', sales_employee_views.SalesEmployeeAssignCustomerView.as_view(), name='sales_employee_assign_customer'),
+    path('sales-employees/<int:pk>/customers/<uuid:customer_pk>/remove/', sales_employee_views.SalesEmployeeRemoveCustomerView.as_view(), name='sales_employee_remove_customer'),
     
-    # Product URLs
     path('products/', product_views.ProductListView.as_view(), name='product_list'),
     path('products/create/', product_views.ProductCreateView.as_view(), name='product_create'),
     path('products/edit/<uuid:pk>/', product_views.ProductUpdateView.as_view(), name='product_edit'),
@@ -36,7 +37,6 @@ urlpatterns = [
     path('get-product-info/', product_views.get_product_info, name='get_product_info'),   
     path('add-stock/', product_views.AddStockView.as_view(), name='add_stock'),
     
-    # Sales Order URLs
     path('sales-orders/', sales_order_views.SalesOrderListView.as_view(), name='sales_order_list'),
     path('sales-orders/create/', sales_order_views.SalesOrderCreateView.as_view(), name='sales_order_create'),
     path('sales-orders/update/<int:pk>/', sales_order_views.SalesOrderUpdateView.as_view(), name='sales_order_update'),
@@ -45,11 +45,9 @@ urlpatterns = [
     path('sales-orders/print/<int:pk>/', sales_order_views.SalesOrderPrintView.as_view(), name='sales_order_print'),     
     path('sales-orders/detailed/', sales_order_views.SalesOrderItemDetailedListView.as_view(), name='sales_order_detailed_list'),
     
-    #return
     path('sales-orders/return/<int:sales_order_id>/', sales_order_views.ReturnSalesCreateView.as_view(), name='sales_order_return'),
     path('sales-orders/view-return/<int:sales_order_id>/', sales_order_views.ReturnSalesDetailView.as_view(), name='sales_order_view_return'),
 
-    # Invoice URLs
     path('invoices/', invoice_views.ARInvoiceListView.as_view(), name='invoice_list'),
     path('invoices/create/', invoice_views.ARInvoiceCreateView.as_view(), name='invoice_create'),
     path('invoices/create/<int:sales_order_id>/', invoice_views.ARInvoiceCreateView.as_view(), name='invoice_create_from_sales_order'),
@@ -59,7 +57,6 @@ urlpatterns = [
     path('invoices/print/<int:pk>/', invoice_views.ARInvoicePrintView.as_view(), name='invoice_print'),
     path('invoices/search/', invoice_views.ARInvoiceSearchView.as_view(), name='invoice_search'),   
 
-    # Purchase Order URLs
   
 
     path('purchase-orders/', purchase_views.PurchaseOrderListView.as_view(), name='purchase_order_list'),
@@ -72,7 +69,6 @@ urlpatterns = [
     path('purchase-orders/<int:pk>/print/', purchase_views.PurchaseOrderPrintView.as_view(), name='purchase_order_print'),    
 
 
-    # MaterialsPurchase URLs
     path('materials-purchases/', materials_purchase_views.MaterialsPurchaseListView.as_view(), name='materials_purchase_list'),
     path('materials-purchases/create/', materials_purchase_views.MaterialsPurchaseCreateView.as_view(), name='materials_purchase_create'),
     path('materials-purchases/<int:pk>/update/', materials_purchase_views.MaterialsPurchaseUpdateView.as_view(), name='materials_purchase_update'),
@@ -84,35 +80,27 @@ urlpatterns = [
     path('reports/print/', report_views.ReportPrintView.as_view(), name='sales_report_print'),
     path('reports/excel/', report_views.ReportExcelView.as_view(), name='sales_report_excel'),
     
-    # Stock Report URLs
     path('reports/stock/', report_views.StockReportView.as_view(), name='stock_report'),
     path('reports/stock/print/', report_views.StockReportPrintView.as_view(), name='stock_report_print'),
     
-    # Minimum Stock Report URL
     path('reports/minimum-stock/', report_views.MinimumStockReportView.as_view(), name='minimum_stock_report'),
     
-    # Single Product Report Print URL
     path('reports/single-product/print/', report_views.SingleProductReportPrintView.as_view(), name='single_product_report_print'),
     
-    # Single Product Stock Report Print URL  
     path('reports/single-product-stock/print/', report_views.SingleProductStockReportPrintView.as_view(), name='single_product_stock_report_print'),
     
-    # Customer Report URLs
     path('reports/customers/', report_views.CustomerReportView.as_view(), name='customer_report'),
     path('reports/customers/print/', report_views.CustomerReportPrintView.as_view(), name='customer_report_print'),
     path('reports/customers/excel/', report_views.CustomerReportExcelView.as_view(), name='customer_report_excel'),
     
-    # Sales Order Report URLs
     path('reports/sales-orders/', sales_order_report_views.SalesOrderReportView.as_view(), name='sales_order_report'),
     path('reports/sales-orders/print/', sales_order_report_views.SalesOrderReportPrintView.as_view(), name='sales_order_report_print'),
     path('reports/sales-orders/excel/', sales_order_report_views.SalesOrderReportExcelView.as_view(), name='sales_order_report_excel'),
     
-    # Product-wise Report URLs
     path('reports/product-wise/', report_views.ProductWiseReportView.as_view(), name='product_wise_report'),
     path('reports/product-wise/print/', report_views.ProductWiseReportPrintView.as_view(), name='product_wise_report_print'),
     path('reports/product-wise/excel/', report_views.ProductWiseReportExcelView.as_view(), name='product_wise_report_excel'),
     
-    # Customer-wise Report URLs
     path('reports/customer-wise/', report_views.CustomerWiseReportView.as_view(), name='customer_wise_report'),
     path('reports/customer-wise/print/', report_views.CustomerWiseReportPrintView.as_view(), name='customer_wise_report_print'),
     path('reports/customer-wise/excel/', report_views.CustomerWiseReportExcelView.as_view(), name='customer_wise_report_excel'),

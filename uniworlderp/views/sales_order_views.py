@@ -1,5 +1,4 @@
 
-# customer_views.py
 
 
 from django import forms
@@ -18,13 +17,10 @@ class SalesOrderListView(ListView):
     paginate_by = 20
 
     def get_queryset(self):
-        # Get the search query from the request
         search_query = self.request.GET.get('search', '')
 
-        # Fetch all records and order them by the latest order_date
         queryset = SalesOrder.objects.all().order_by('-id')
 
-        # Apply search filters if a search query is present
         if search_query:
             queryset = queryset.filter(
                 Q(id__icontains=search_query) |
@@ -36,7 +32,6 @@ class SalesOrderListView(ListView):
         return queryset
 
     def get_context_data(self, **kwargs):
-        # Add the search query to the context for use in the template
         context = super().get_context_data(**kwargs)
         context['search_query'] = self.request.GET.get('search', '')
         return context
@@ -83,6 +78,11 @@ class SalesOrderCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateVi
     success_url = reverse_lazy('customer_vendor:sales_order_list')
     permission_required = 'uniworlderp.add_salesorder'
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['user'] = self.request.user
+        return kwargs
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         if self.request.POST:
@@ -102,7 +102,7 @@ class SalesOrderCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateVi
             try:
                 with transaction.atomic():
                     self.object = form.save(commit=False)
-                    self.object.owner = self.request.user  # Set the owner to the current user
+                    self.object.owner = self.request.user
                     self.object.save()
                     formset.instance = self.object
                     formset.save()
@@ -156,6 +156,11 @@ class SalesOrderUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateVi
     success_url = reverse_lazy('customer_vendor:sales_order_list')
     permission_required = 'uniworlderp.change_salesorder'
 
+    def get_form_kwargs(self):
+        kwargs = super().get_form_kwargs()
+        kwargs['user'] = self.request.user
+        return kwargs
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         if self.request.POST:
@@ -175,7 +180,6 @@ class SalesOrderUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateVi
         print("SALES ORDER UPDATE - STARTING")
         print("="*80)
         
-        # Debug: Show what was posted
         print("\nPOST Data Summary:")
         for key, value in self.request.POST.items():
             if key.startswith('order_items-'):
@@ -185,7 +189,6 @@ class SalesOrderUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateVi
         formset = context['formset']
         
         if formset.is_valid():
-            # Save the sales order first
             self.object = form.save()
             print(f"\n✓ Sales Order #{self.object.id} saved")
             print(f"  Customer: {self.object.customer.name}")
@@ -195,8 +198,6 @@ class SalesOrderUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateVi
             
             formset.instance = self.object
             
-            # Process the formset with commit=False to get deleted_objects
-            # This will handle new items and modifications without saving yet
             print("\n" + "-"*80)
             print("PROCESSING FORMSET")
             print("-"*80)
@@ -206,36 +207,28 @@ class SalesOrderUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateVi
             print(f"  - New/Modified items to save: {len(items)}")
             print(f"  - Items marked for deletion: {len(formset.deleted_objects)}")
             
-            # Debug: Show all current items in database
             current_items = list(self.object.order_items.all().values_list('id', 'product__name', 'quantity'))
             print(f"\nCurrent items in database BEFORE changes:")
             for item_id, product_name, qty in current_items:
                 print(f"  - ID {item_id}: {product_name} x {qty}")
             
-            # Handle deletions FIRST before saving new/modified items
-            # deleted_objects is only available after calling save(commit=False)
             if formset.deleted_objects:
                 print("\n" + "-"*80)
                 print("DELETING ITEMS")
                 print("-"*80)
                 for item in formset.deleted_objects:
-                    if item.pk:  # Only process items that exist in the database
+                    if item.pk:
                         print(f"\n🗑️  Deleting Item ID: {item.pk}")
                         print(f"   Product: {item.product.name}")
                         print(f"   Quantity being returned: {item.quantity}")
                         print(f"   Stock before deletion: {item.product.stock_quantity}")
                         
-                        # The SalesOrderItem.delete method will create the appropriate stock transaction
                         item.delete()
                         
-                        # Refresh product to see updated stock
                         item.product.refresh_from_db()
                         print(f"   Stock after deletion: {item.product.stock_quantity}")
                         print(f"   ✓ Item deleted and stock returned")
             
-            # Save each new/modified item individually to trigger the custom save logic
-            # For new items, the SalesOrderItem.save method will create appropriate stock transactions
-            # For modified items, the SalesOrderItem.save method will detect quantity changes and create transactions
             if items:
                 print("\n" + "-"*80)
                 print("SAVING NEW/MODIFIED ITEMS")
@@ -250,7 +243,6 @@ class SalesOrderUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateVi
                         print(f"   Unit Price: {item.unit_price}")
                         print(f"   Stock before adding: {item.product.stock_quantity}")
                     else:
-                        # Get old item to compare
                         from uniworlderp.models import SalesOrderItem
                         old_item = SalesOrderItem.objects.get(pk=item.pk)
                         quantity_diff = item.quantity - old_item.quantity
@@ -264,12 +256,10 @@ class SalesOrderUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateVi
                     
                     item.save()
                     
-                    # Refresh product to see updated stock
                     item.product.refresh_from_db()
                     print(f"   Stock after save: {item.product.stock_quantity}")
                     print(f"   ✓ Item saved successfully")
             
-            # Debug: Show all items in database AFTER changes
             final_items = list(self.object.order_items.all().values_list('id', 'product__name', 'quantity'))
             print(f"\nFinal items in database AFTER changes:")
             for item_id, product_name, qty in final_items:
@@ -325,7 +315,6 @@ class SalesOrderDetailView(PermissionRequiredMixin, DetailView):
                 field.widget.attrs['disabled'] = 'disabled'
         for field in context['form'].fields.values():
             field.widget.attrs['disabled'] = 'disabled'
-        # Add context for the invoice creation button
         context['can_create_invoice'] = self.request.user.has_perm('uniworlderp.add_arinvoice')
         context['create_invoice_url'] = reverse('customer_vendor:invoice_create_from_sales_order', kwargs={'sales_order_id': self.object.id})
                     
@@ -366,11 +355,9 @@ class SalesOrderDeleteView(LoginRequiredMixin, PermissionRequiredMixin, DeleteVi
     def delete(self, request, *args, **kwargs):
         self.object = self.get_object()
         
-        # Delete each item to trigger their individual delete methods which create stock transactions
         for item in self.object.order_items.all():
             item.delete()
 
-        # messages.success(self.request, self.success_message)
         return super(SalesOrderDeleteView, self).delete(request, *args, **kwargs)
 
     def get_context_data(self, **kwargs):
@@ -386,12 +373,12 @@ class SalesOrderPrintView(LoginRequiredMixin, DetailView):
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
-        company = Company.objects.first()  # Assuming you have only one company
+        company = Company.objects.first()
         items = self.object.order_items.all()
         subtotal = sum(item.total for item in items)
         discount = self.object.discount
         shipping = self.object.shipping
-        tax = subtotal * Decimal('0.0')  # 12% tax
+        tax = subtotal * Decimal('0.0')
         total = subtotal - discount + shipping + tax
 
         context.update({
@@ -406,7 +393,6 @@ class SalesOrderPrintView(LoginRequiredMixin, DetailView):
         return context
 
 
-# views for return sales
 class ReturnSalesCreateView(LoginRequiredMixin,PermissionRequiredMixin, CreateView):
     model = ReturnSales
     form_class = ReturnSalesForm
@@ -426,27 +412,23 @@ class ReturnSalesCreateView(LoginRequiredMixin,PermissionRequiredMixin, CreateVi
         if self.request.POST:
             context['formset'] = ReturnSalesItemFormSet(self.request.POST, instance=self.object)
         else:
-            # Initialize formset with sales order items
             initial_data = []
             for item in self.sales_order.order_items.all():
-                # Calculate max returnable quantity
                 previously_returned = ReturnSalesItem.objects.filter(
                     sales_order_item=item
                 ).aggregate(total=Sum('quantity'))['total'] or 0
             
                 max_returnable = item.quantity - previously_returned
             
-                # Add all items to initial data, even if max_returnable is 0
                 initial_data.append({
                     'sales_order_item': item.id,
                     'unit_price': item.unit_price,
-                    'quantity': 0,  # Default to 0 
+                    'quantity': 0,
                     'sales_quantity': item.quantity,
                     'max_returnable': max_returnable,
                     'product_name': item.product.name,
                 })
         
-            # Use the factory function instead of the static formset
             context['formset'] = get_return_sales_item_formset(
                 sales_order=self.sales_order,
                 queryset=ReturnSalesItem.objects.none(),
@@ -474,31 +456,24 @@ class ReturnSalesCreateView(LoginRequiredMixin,PermissionRequiredMixin, CreateVi
                     self.object.owner = self.request.user
                     self.object.save()  
                     
-                    # Now save the formset items
                     formset.instance = self.object  
                     formset_items = formset.save(commit=False)
                     
                     has_items = False
-                    # Process each form/item manually
                     for item in formset_items:
-                        # Only save items with quantity > 0
                         if item.quantity > 0:
                             has_items = True
-                            # Ensure total is calculated
                             item.total = Decimal(item.quantity) * item.unit_price  
                             item.return_sales = self.object  
                             item.save()  
                     
-                    # Handle deleted forms if any
                     for form in formset.deleted_forms:
                         if form.instance.pk:
                             form.instance.delete()
                     
-                    # Check if at least one item was returned
                     if not has_items:
                         raise ValidationError("You must return at least one item.")
                     
-                    # Update total amount
                     self.object.update_total_amount()
                     
                     messages.success(self.request, 'Sales return created successfully.')

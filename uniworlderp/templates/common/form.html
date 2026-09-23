@@ -39,10 +39,11 @@
                                           placeholder=" "
                                           {% if field.field.required %}required{% endif %}>{{ field.value|default:'' }}</textarea>
                             {% elif field.field.widget.input_type == "date" %}
-                                <input type="date" 
-                                       name="{{ field.name }}" 
-                                       id="{{ field.id_for_label }}" 
+                                <input type="date"
+                                       name="{{ field.name }}"
+                                       id="{{ field.id_for_label }}"
                                        class="form-input"
+                                       lang="en-GB"
                                        value="{% if field.value %}{{ field.value|date:'Y-m-d' }}{% elif field.field.initial %}{{ field.field.initial|date:'Y-m-d' }}{% endif %}"
                                        {% if field.field.required %}required{% endif %}>
                             {% else %}
@@ -114,6 +115,139 @@
 
                     </div>
                 </form>
+
+                {% if show_customer_management %}
+                <!-- Customers assigned to this employee -->
+                <div class="border-t border-[hsl(var(--border))] pt-6 mt-2">
+                    {% if object.pk %}
+                    <div class="flex items-center justify-between mb-4">
+                        <h3 class="text-lg font-semibold">Customers ({{ assigned_customers|length }})</h3>
+                        {% if can_manage_customers %}
+                        <button type="button" id="openAddCustomerModal" class="inline-flex items-center px-4 py-2 bg-gradient-to-br from-[#a31319] to-black text-white rounded-md hover:bg-opacity-90 text-sm">
+                            <i class="ri-add-line mr-1"></i> Add Customer
+                        </button>
+                        {% endif %}
+                    </div>
+
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left">
+                            <thead class="text-xs uppercase bg-[hsl(var(--muted))]">
+                                <tr>
+                                    <th class="px-4 py-2">Name</th>
+                                    <th class="px-4 py-2">Phone</th>
+                                    <th class="px-4 py-2">WhatsApp</th>
+                                    <th class="px-4 py-2">Business Type</th>
+                                    <th class="px-4 py-2">City</th>
+                                    <th class="px-4 py-2">Area</th>
+                                    {% if can_manage_customers %}<th class="px-4 py-2">Actions</th>{% endif %}
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for customer in assigned_customers %}
+                                <tr class="border-b border-[hsl(var(--border))]">
+                                    <td class="px-4 py-2 whitespace-nowrap">{{ customer.name }}</td>
+                                    <td class="px-4 py-2 whitespace-nowrap">{{ customer.phone_number }}</td>
+                                    <td class="px-4 py-2 whitespace-nowrap">{{ customer.whatsapp_number|default:"-" }}</td>
+                                    <td class="px-4 py-2 whitespace-nowrap">{{ customer.get_business_type_display }}</td>
+                                    <td class="px-4 py-2 whitespace-nowrap">{{ customer.city|default:"-" }}</td>
+                                    <td class="px-4 py-2 whitespace-nowrap">{{ customer.area|default:"-" }}</td>
+                                    {% if can_manage_customers %}
+                                    <td class="px-4 py-2 whitespace-nowrap">
+                                        <form method="post" action="{% url 'customer_vendor:sales_employee_remove_customer' object.pk customer.pk %}"
+                                              class="inline" onsubmit="return confirm('Remove {{ customer.name|escapejs }} from this employee?');">
+                                            {% csrf_token %}
+                                            <input type="hidden" name="next" value="{{ request.path }}">
+                                            <button type="submit" class="px-2 py-1 text-xs font-semibold rounded-full bg-red-800 text-red-100 hover:bg-red-700">
+                                                <i class="ri-close-line mr-1"></i>Remove
+                                            </button>
+                                        </form>
+                                    </td>
+                                    {% endif %}
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="7" class="px-4 py-4 text-center text-[hsl(var(--muted-foreground))]">No customers assigned yet.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {% if can_manage_customers %}
+                    <!-- Add Customer popup: only customers with no employee at all are selectable, so an
+                         already-assigned-to-this-or-another-employee customer never appears in the list. -->
+                    <div id="addCustomerModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+                        <div class="bg-[hsl(var(--background))] rounded-lg shadow-xl w-full max-w-md max-h-[80vh] flex flex-col">
+                            <div class="flex items-center justify-between p-4 border-b border-[hsl(var(--border))]">
+                                <h3 class="text-lg font-semibold">Select a Customer</h3>
+                                <button type="button" id="closeAddCustomerModal" class="text-xl leading-none">&times;</button>
+                            </div>
+                            <div class="p-4 pb-0">
+                                <input type="text" id="customerSearchInput" placeholder="Search customers..."
+                                       class="w-full px-3 py-2 border border-[hsl(var(--border))] rounded-md bg-[hsl(var(--background))]">
+                            </div>
+                            <form method="post" action="{% url 'customer_vendor:sales_employee_assign_customer' object.pk %}" class="flex flex-col overflow-hidden flex-1">
+                                {% csrf_token %}
+                                <input type="hidden" name="next" value="{{ request.path }}">
+                                <div id="customerOptionsList" class="overflow-y-auto px-4 py-2 flex-1 space-y-1">
+                                    {% for customer in available_customers %}
+                                    <label class="flex items-center gap-2 p-2 rounded-md hover:bg-[hsl(var(--muted))] cursor-pointer customer-option"
+                                           data-name="{{ customer.name|lower }}">
+                                        <input type="radio" name="customer" value="{{ customer.pk }}" required>
+                                        <span>{{ customer.name }}
+                                            <span class="text-xs text-[hsl(var(--muted-foreground))]">
+                                                ({{ customer.phone_number }}{% if customer.city %}, {{ customer.city }}{% endif %})
+                                            </span>
+                                        </span>
+                                    </label>
+                                    {% empty %}
+                                    <p class="text-sm text-[hsl(var(--muted-foreground))] py-4 text-center">No unassigned customers available.</p>
+                                    {% endfor %}
+                                </div>
+                                <div class="p-4 border-t border-[hsl(var(--border))] flex justify-end gap-2">
+                                    <button type="button" id="cancelAddCustomerModal" class="px-4 py-2 border border-[hsl(var(--border))] rounded-md">Cancel</button>
+                                    <button type="submit" class="px-4 py-2 bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] rounded-md">Add</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    <script>
+                        document.addEventListener('DOMContentLoaded', function () {
+                            const modal = document.getElementById('addCustomerModal');
+                            const openBtn = document.getElementById('openAddCustomerModal');
+                            const closeBtn = document.getElementById('closeAddCustomerModal');
+                            const cancelBtn = document.getElementById('cancelAddCustomerModal');
+                            const searchInput = document.getElementById('customerSearchInput');
+
+                            function filterOptions() {
+                                const term = searchInput.value.toLowerCase();
+                                document.querySelectorAll('.customer-option').forEach(function (el) {
+                                    el.style.display = el.dataset.name.includes(term) ? '' : 'none';
+                                });
+                            }
+                            function openModal() {
+                                modal.classList.remove('hidden');
+                                searchInput.value = '';
+                                filterOptions();
+                                searchInput.focus();
+                            }
+                            function closeModal() {
+                                modal.classList.add('hidden');
+                            }
+
+                            if (openBtn) openBtn.addEventListener('click', openModal);
+                            if (closeBtn) closeBtn.addEventListener('click', closeModal);
+                            if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+                            modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+                            if (searchInput) searchInput.addEventListener('input', filterOptions);
+                        });
+                    </script>
+                    {% endif %}
+                    {% else %}
+                    <p class="text-sm text-[hsl(var(--muted-foreground))]">Save this sales employee first to assign customers.</p>
+                    {% endif %}
+                </div>
+                {% endif %}
             </div>
 
             <!-- Card Footer -->

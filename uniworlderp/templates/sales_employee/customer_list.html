@@ -1,0 +1,77 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block main_content %}
+{% include "message.html" %}
+
+<div class="bg-[hsl(var(--background))] rounded-lg shadow-lg overflow-hidden border border-[hsl(var(--border))]">
+    <div class="p-6">
+        <div class="flex flex-col sm:flex-row justify-between items-center mb-4 space-y-4 sm:space-y-0">
+            <h2 class="text-xl font-semibold">Customers assigned to {{ sales_employee }}</h2>
+            <div class="flex items-center space-x-2">
+                {% if can_add %}
+                <a href="{% url 'customer_vendor:customer_create' %}?sales_employee={{ sales_employee.pk }}"
+                   class="inline-flex items-center px-4 py-2 bg-gradient-to-br from-[#a31319] to-black text-white rounded-md hover:bg-opacity-90 text-sm">
+                    <i class="ri-add-line mr-1"></i> Add Customer
+                </a>
+                {% endif %}
+                <a href="{% url 'customer_vendor:sales_employee_view' sales_employee.pk %}"
+                   class="px-4 py-2 border border-[hsl(var(--border))] rounded-md hover:bg-[hsl(var(--muted))] text-sm text-[hsl(var(--foreground))]">
+                    Back to Employee
+                </a>
+            </div>
+        </div>
+
+        <div class="overflow-x-auto table-container">
+            <div class="bg-gradient-to-br from-[#a31319] to-black rounded-lg shadow-lg overflow-hidden">
+                <div class="p-6">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left text-gray-200">
+                            <thead class="text-xs uppercase bg-[#480d0f] text-gray-100">
+                                <tr>
+                                    <th scope="col" class="px-6 py-3">Name</th>
+                                    <th scope="col" class="px-6 py-3">Phone Number</th>
+                                    <th scope="col" class="px-6 py-3">Business Type</th>
+                                    <th scope="col" class="px-6 py-3">City</th>
+                                    <th scope="col" class="px-6 py-3">Area</th>
+                                    <th scope="col" class="px-6 py-3">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for customer in customers %}
+                                <tr class="border-b border-gray-700 hover:bg-[#5a1114] transition-colors">
+                                    <td class="px-6 py-4 whitespace-nowrap">{{ customer.name }}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap">{{ customer.phone_number }}</td>
+                                    <td class="px-6 py-4">{{ customer.get_business_type_display }}</td>
+                                    <td class="px-6 py-4">{{ customer.city|default:"-" }}</td>
+                                    <td class="px-6 py-4">{{ customer.area|default:"-" }}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        <div class="flex space-x-2">
+                                            {% if perms.uniworlderp.view_customervendor %}
+                                            <a href="{% url 'customer_vendor:customer_view' customer.pk %}" class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-800 text-blue-100 hover:bg-blue-700">
+                                                <i class="ri-eye-line mr-1"></i>View
+                                            </a>
+                                            {% endif %}
+                                            {% if perms.uniworlderp.change_customervendor %}
+                                            <a href="{% url 'customer_vendor:customer_edit' customer.pk %}" class="px-2 py-1 text-xs font-semibold rounded-full bg-green-800 text-green-100 hover:bg-green-700">
+                                                <i class="ri-edit-line mr-1"></i>Edit
+                                            </a>
+                                            {% endif %}
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="6" class="px-6 py-4 text-center text-sm text-gray-400">No customers assigned to this employee yet.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+            </div>
+        </div>
+        {% include "includes/pagination.html" %}
+    </div>
+</div>
+{% endblock %}

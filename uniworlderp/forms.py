@@ -9,7 +9,7 @@ from django.utils import timezone
 from decimal import Decimal, InvalidOperation
 from django.db.models.functions import Concat
 from django.db.models import Value, CharField
-from django.db.models import F
+from django.db.models import F, Q
 from django.utils.safestring import mark_safe
 
 from .models import (
@@ -18,7 +18,6 @@ from .models import (
 )
 from decimal import Decimal, InvalidOperation
 
-# Common CSS classes
 BASE_FIELD_CLASSES = (
     'block w-full px-3 py-2  border border-gray-200 rounded-md '
     'text-gray-900 placeholder-gray-400 focus:outline-none focus:ring-2 '
@@ -66,8 +65,9 @@ class CustomerVendorForm(BaseStyleForm):
 
     class Meta:
         model = CustomerVendor
-        fields = ['name', 'email', 'phone_number', 'whatsapp_number', 'business_type', 'entity_type', 'address', 'city', 'area']
+        fields = ['name', 'email', 'phone_number', 'whatsapp_number', 'business_type', 'entity_type', 'sales_employee', 'address', 'city', 'area']
         help_texts = {
+            'sales_employee': 'Sales employee responsible for this customer',
             'business_type': 'Select the type of business relationship (Retailer, Wholesaler, Manufacturer, or Others)',
             'phone_number': 'Phone number is required for all customers and vendors',
             'whatsapp_number': 'WhatsApp number is optional but recommended for better communication',
@@ -77,28 +77,23 @@ class CustomerVendorForm(BaseStyleForm):
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Make phone_number field required with custom validation message
         self.fields['phone_number'].required = True
         self.fields['phone_number'].error_messages = {
             'required': 'Phone number is required for all customers and vendors.'
         }
 
-        # Set field labels for better user experience
         self.fields['phone_number'].label = 'Phone Number *'
         self.fields['whatsapp_number'].label = 'WhatsApp Number'
         self.fields['business_type'].label = 'Business Type *'
 
-        # Make business_type required
         self.fields['business_type'].required = True
         self.fields['business_type'].error_messages = {
             'required': 'Please select a business type.'
         }
 
-        # Populate City/Area dropdowns from Bangladesh location reference data.
-        # Area choices include every area across all cities so the field
-        # validates regardless of which city is selected; the City/Area
-        # cascading filter is handled client-side via JS.
         from .location_data import get_city_choices, get_area_choices
+        self.fields['sales_employee'].queryset = SalesEmployee.objects.order_by('full_name')
+
         self.fields['city'].choices = [('', '---------')] + get_city_choices()
         self.fields['area'].choices = [('', '---------')] + get_area_choices()
 
@@ -108,7 +103,6 @@ class CustomerVendorForm(BaseStyleForm):
         if not phone_number or phone_number.strip() == '':
             raise ValidationError('Phone number is required for all customers and vendors.')
         
-        # Basic phone number format validation
         phone_number = phone_number.strip()
         if len(phone_number) < 10:
             raise ValidationError('Phone number must be at least 10 digits long.')
@@ -121,7 +115,6 @@ class CustomerVendorForm(BaseStyleForm):
         if not business_type:
             raise ValidationError('Please select a business type.')
         
-        # Validate against allowed choices
         valid_choices = [choice[0] for choice in CustomerVendor.BUSINESS_TYPE_CHOICES]
         if business_type not in valid_choices:
             raise ValidationError('Please select a valid business type option.')
@@ -134,7 +127,6 @@ class CustomerVendorForm(BaseStyleForm):
         phone_number = cleaned_data.get('phone_number')
         business_type = cleaned_data.get('business_type')
         
-        # Ensure both required fields are provided
         if not phone_number:
             self.add_error('phone_number', 'Phone number is required for all customers and vendors.')
         
@@ -188,8 +180,6 @@ class ProductForm(BaseStyleForm):
 
     def set_field_labels(self):
         """Set field labels to use the verbose names from the model"""
-        # The labels will automatically use the verbose_name from the model
-        # but we can override them here if needed for consistency
         field_labels = {
             'sku': 'Product Code',
             'name': 'Product Name', 
@@ -214,7 +204,6 @@ class ProductForm(BaseStyleForm):
         if not unit:
             raise ValidationError("Unit selection is required.")
         
-        # Validate against allowed choices
         valid_choices = [choice[0] for choice in Product.UNIT_CHOICES]
         if unit not in valid_choices:
             raise ValidationError("Please select a valid unit option.")
@@ -227,7 +216,6 @@ class ProductForm(BaseStyleForm):
         reorder_level = cleaned_data.get('reorder_level')
         unit = cleaned_data.get('unit')
         
-        # Additional validation for unit field requirements
         if not unit:
             self.add_error('unit', 'Unit selection is required for all products.')
         
@@ -283,14 +271,50 @@ class SalesOrderForm(forms.ModelForm):
         model = SalesOrder
         fields = ['customer', 'sales_employee', 'delivery_status', 'order_date', 'discount', 'shipping', 'notes']
 
-    def __init__(self, *args, **kwargs):
+    def __init__(self, *args, user=None, **kwargs):
         super().__init__(*args, **kwargs)
-        self.fields['customer'].queryset = CustomerVendor.objects.filter(entity_type='customer').order_by('name')
-        self.fields['sales_employee'].queryset = SalesEmployee.objects.all().order_by('full_name')
+        self.restrict_customers = bool(user and not user.is_superuser)
+
+        customers = CustomerVendor.objects.filter(entity_type='customer').order_by('name')
+        employees = SalesEmployee.objects.all().order_by('full_name')
+
+        if self.restrict_customers:
+            self.order_fields(['sales_employee', 'customer'])
+            self.fields['sales_employee'].required = True
+            linked_employee = getattr(user, 'sales_employee', None)
+            if linked_employee:
+                employees = employees.filter(
+                    Q(pk=linked_employee.pk) | Q(pk=self.instance.sales_employee_id)
+                )
+                customers = customers.filter(
+                    Q(sales_employee=linked_employee) | Q(pk=self.instance.customer_id)
+                )
+                if not self.instance.pk:
+                    self.initial['sales_employee'] = linked_employee.pk
+            else:
+                customers = customers.filter(
+                    Q(sales_employee__isnull=False) | Q(pk=self.instance.customer_id)
+                )
+
+        self.fields['customer'].queryset = customers.select_related('sales_employee')
+        self.fields['sales_employee'].queryset = employees
         if self.instance.order_date:
             self.fields['order_date'].initial = self.instance.order_date.strftime('%Y-%m-%d')
         else:
             self.fields['order_date'].initial = timezone.now().strftime('%Y-%m-%d')
+
+    def clean(self):
+        cleaned_data = super().clean()
+        if not self.restrict_customers:
+            return cleaned_data
+
+        customer = cleaned_data.get('customer')
+        employee = cleaned_data.get('sales_employee')
+        unchanged = self.instance.pk and customer and customer.pk == self.instance.customer_id
+        if customer and employee and customer.sales_employee_id != employee.pk and not unchanged:
+            self.add_error('customer', f"{customer.name} is not assigned to {employee}.")
+        return cleaned_data
+
 class CustomSelectWithSKU(forms.Select):
     def create_option(self, name, value, label, selected, index, subindex=None, attrs=None):
         option = super().create_option(name, value, label, selected, index, subindex, attrs)
@@ -320,7 +344,6 @@ class SalesOrderItemForm(forms.ModelForm):
         product = self.cleaned_data.get('product')
         if product:
             try:
-                # Ensure the product ID is a valid UUID
                 uuid.UUID(str(product.id))
             except (ValueError, AttributeError):
                 raise ValidationError("Invalid product selection")
@@ -389,7 +412,6 @@ class PurchaseOrderItemForm(BaseOrderItemForm):
         model = PurchaseOrderItem
         fields = ['product', 'quantity', 'unit_price']
 
-# Form factories
 SalesOrderItemFormSet = forms.inlineformset_factory(
     SalesOrder, SalesOrderItem, form=SalesOrderItemForm,
     extra=1, can_delete=True
@@ -409,10 +431,10 @@ class AddStockForm(forms.ModelForm):
         fields = ['product', 'quantity']
         widgets = {
             'product': forms.Select(attrs={
-                'class': BASE_FIELD_CLASSES,  # Using the global base field classes for consistency
+                'class': BASE_FIELD_CLASSES,
             }),
             'quantity': forms.NumberInput(attrs={
-                'class': BASE_FIELD_CLASSES,  # Using the global base field classes for consistency
+                'class': BASE_FIELD_CLASSES,
                 'min': '0'
             }),
         }
@@ -420,7 +442,6 @@ class AddStockForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['product'].empty_label = "Select Product"
-        # Minimal fix: ensure product queryset is properly initialized
         self.fields['product'].queryset = Product.objects.filter(is_active=True).order_by('name')
 
 AddStockFormSet = forms.modelformset_factory(
@@ -458,7 +479,6 @@ MaterialsPurchaseItemFormSet = forms.inlineformset_factory(
     can_delete=True
 )
 
-# Return Sales
 from django.db.models import Sum
 
 class ReturnSalesForm(forms.ModelForm):
@@ -503,7 +523,7 @@ class ReturnSalesItemForm(forms.ModelForm):
         fields = ['sales_order_item', 'quantity', 'unit_price', 'max_returnable', 'display_total', 'product_name']
         widgets = {
             'sales_order_item': forms.HiddenInput(),
-            'quantity': forms.NumberInput(attrs={'class': 'form-input', 'min': '0'}),  # Changed min to 0
+            'quantity': forms.NumberInput(attrs={'class': 'form-input', 'min': '0'}),
             'unit_price': forms.NumberInput(attrs={'class': 'form-input', 'readonly': 'readonly'}),
         }
     
@@ -524,11 +544,9 @@ class ReturnSalesItemForm(forms.ModelForm):
         if quantity is None:
             quantity = 0
             
-        # If quantity is 0, no need to validate further
         if quantity == 0:
             return quantity
             
-        # Calculate max returnable quantity
         previously_returned = ReturnSalesItem.objects.filter(
             sales_order_item=sales_order_item
         ).exclude(id=self.instance.id if self.instance.id else None).aggregate(
@@ -547,7 +565,6 @@ class ReturnSalesItemForm(forms.ModelForm):
     def save(self, commit=True):
         instance = super().save(commit=False)
         
-        # Calculate the total value before saving
         if instance.quantity and instance.unit_price:
             instance.total = Decimal(instance.quantity) * instance.unit_price
         else:
@@ -569,24 +586,21 @@ ReturnSalesItemFormSet = forms.inlineformset_factory(
 
 
 def get_return_sales_item_formset(sales_order=None, **kwargs):
-    # Count the number of items in the sales order
     item_count = 0
     if sales_order:
         item_count = sales_order.order_items.count()
     
-    # Create the formset with the appropriate number of forms
     return forms.inlineformset_factory(
         ReturnSales,
         ReturnSalesItem,
         form=ReturnSalesItemForm,
-        extra=item_count,  # Dynamic extra based on order items
+        extra=item_count,
         can_delete=True,
         min_num=0,
         validate_min=False
     )(**kwargs)
 
 
-# Stock Report Form
 class StockReportForm(forms.Form):
     """Form for stock report filtering with strict date validation"""
     
@@ -616,7 +630,7 @@ class StockReportForm(forms.Form):
             attrs={
                 'type': 'date',
                 'class': BASE_FIELD_CLASSES,
-                'min': '2025-07-27',  # HTML5 min attribute
+                'min': '2025-07-27',
                 'placeholder': 'dd/mm/yyyy'
             }
         ),
@@ -630,7 +644,7 @@ class StockReportForm(forms.Form):
             attrs={
                 'type': 'date', 
                 'class': BASE_FIELD_CLASSES,
-                'min': '2025-07-27',  # HTML5 min attribute
+                'min': '2025-07-27',
                 'placeholder': 'dd/mm/yyyy'
             }
         ),
@@ -640,13 +654,11 @@ class StockReportForm(forms.Form):
     
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
-        # Set default end date to today
         from django.utils import timezone
         today = timezone.now().date()
         self.fields['end_date'].initial = today
-        self.fields['end_date'].widget.attrs['max'] = today.strftime('%Y-%m-%d')  # HTML5 max attribute
+        self.fields['end_date'].widget.attrs['max'] = today.strftime('%Y-%m-%d')
         
-        # Update product queryset to show name and SKU
         self.fields['product_id'].label_from_instance = lambda obj: f"{obj.name} - {obj.sku}"
         self.fields['product_id'].queryset = Product.objects.filter(is_active=True).order_by('name')
     
@@ -657,44 +669,37 @@ class StockReportForm(forms.Form):
         end_date = cleaned_data.get('end_date')
         product_id = cleaned_data.get('product_id')
         
-        # Absolute minimum date validation (July 27, 2025)
         from datetime import date
         from django.utils import timezone
         
         MIN_DATE = date(2025, 7, 27)
         today = timezone.now().date()
         
-        # Validate product exists if provided
         if product_id:
             try:
                 uuid.UUID(str(product_id.id))
             except (ValueError, AttributeError):
                 raise ValidationError("Invalid product selection")
         
-        # Custom range validation
         if date_range == 'custom':
             if not start_date:
                 raise ValidationError("Start date is required for custom range")
             if not end_date:
                 raise ValidationError("End date is required for custom range")
             
-            # Validate absolute minimum date
             if start_date < MIN_DATE:
                 raise ValidationError(f"Start date cannot be earlier than {MIN_DATE.strftime('%B %d, %Y')}. No data is available before this date.")
             
             if end_date < MIN_DATE:
                 raise ValidationError(f"End date cannot be earlier than {MIN_DATE.strftime('%B %d, %Y')}. No data is available before this date.")
             
-            # End date cannot be in future
             if end_date > today:
                 raise ValidationError("End date cannot be in the future")
             
-            # Start date cannot be after end date
             if start_date > end_date:
                 raise ValidationError("Start date cannot be after end date")
         
         elif date_range == 'today':
-            # For today, validate current date against minimum date
             if today < MIN_DATE:
                 raise ValidationError(f"Current date is before the minimum allowed date ({MIN_DATE.strftime('%B %d, %Y')}). No stock data is available.")
         

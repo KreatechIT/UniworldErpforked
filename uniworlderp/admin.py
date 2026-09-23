@@ -11,8 +11,8 @@ class CustomerVendorAttachmentInline(admin.TabularInline):
 
 @admin.register(CustomerVendor)
 class CustomerVendorAdmin(admin.ModelAdmin):
-    list_display = ('name', 'email', 'phone_number', 'whatsapp_number', 'business_type', 'entity_type', 'created_at')
-    list_filter = ('entity_type', 'business_type', 'created_at')
+    list_display = ('name', 'email', 'phone_number', 'whatsapp_number', 'business_type', 'entity_type', 'sales_employee', 'created_at')
+    list_filter = ('entity_type', 'business_type', 'sales_employee', 'created_at')
     search_fields = ('name', 'email', 'phone_number', 'whatsapp_number')
     inlines = [CustomerVendorAttachmentInline]
 
@@ -38,16 +38,7 @@ class SalesOrderAdmin(admin.ModelAdmin):
     search_fields = ('customer__name', 'sales_employee__user__username')
     inlines = [SalesOrderItemInline]
 
-# class PurchaseOrderItemInline(admin.TabularInline):
-#     model = PurchaseOrderItem
-#     extra = 1
 
-# @admin.register(PurchaseOrder)
-# class PurchaseOrderAdmin(admin.ModelAdmin):
-#     list_display = ('id', 'supplier', 'order_date', 'created_at')
-#     list_filter = ('order_date', 'created_at')
-#     search_fields = ('supplier__name',)
-#     inlines = [PurchaseOrderItemInline]
 
 class ARInvoiceItemInline(admin.TabularInline):
     model = ARInvoiceItem
@@ -60,7 +51,6 @@ class ARInvoiceAdmin(admin.ModelAdmin):
     search_fields = ('customer__name', 'sales_employee__user__username')
     inlines = [ARInvoiceItemInline]
 
-# Register the remaining models
 admin.site.register(CustomerVendorAttachment)
 admin.site.register(SalesOrderItem)
 admin.site.register(PurchaseOrderItem)

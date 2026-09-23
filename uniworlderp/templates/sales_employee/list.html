@@ -87,6 +87,11 @@
                                                     <i class="ri-delete-bin-line mr-1"></i>Delete
                                                 </a>
                                                 {% endif %}
+                                                {% if perms.uniworlderp.view_customervendor %}
+                                                <a href="{% url 'customer_vendor:sales_employee_customers' sales_employee.pk %}" class="px-2 py-1 text-xs font-semibold rounded-full bg-purple-800 text-purple-100 hover:bg-purple-700">
+                                                    <i class="ri-user-shared-line mr-1"></i>Customers
+                                                </a>
+                                                {% endif %}
                                             </div>
                                         </td>
                                     </tr>
