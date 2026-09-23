@@ -6,7 +6,7 @@ from django.urls import reverse
 
 from uniworlderp import models
 from .common_imports import *
-from uniworlderp.models import ReturnSales, ReturnSalesItem, SalesOrder, SalesOrderItem, Product,StockTransaction,SalesEmployee
+from uniworlderp.models import ReturnSales, ReturnSalesItem, SalesOrder, SalesOrderItem, Product,StockTransaction,SalesEmployee,CustomerVendor
 from uniworlderp.forms import ReturnSalesForm, ReturnSalesItemFormSet, SalesOrderForm, SalesOrderItemFormSet, get_return_sales_item_formset
 from company.models import Company, Branch, ContactPerson
 
@@ -39,6 +39,10 @@ class SalesOrderListView(ListView):
         search_query = self.request.GET.get('search', '')
         status = self.request.GET.get('status', '')
         delivery_status = self.request.GET.get('delivery_status', '')
+        customer_id = self.request.GET.get('customer', '')
+        sales_employee_id = self.request.GET.get('sales_employee', '')
+        start_date = self.request.GET.get('start_date', '')
+        end_date = self.request.GET.get('end_date', '')
 
         queryset = SalesOrder.objects.all().order_by('-id')
 
@@ -53,6 +57,14 @@ class SalesOrderListView(ListView):
             queryset = queryset.filter(status=status)
         if delivery_status:
             queryset = queryset.filter(delivery_status=delivery_status)
+        if customer_id:
+            queryset = queryset.filter(customer_id=customer_id)
+        if sales_employee_id:
+            queryset = queryset.filter(sales_employee_id=sales_employee_id)
+        if start_date:
+            queryset = queryset.filter(order_date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(order_date__lte=end_date)
 
         return queryset
 
@@ -61,8 +73,12 @@ class SalesOrderListView(ListView):
         context['search_query'] = self.request.GET.get('search', '')
         context['selected_status'] = self.request.GET.get('status', '')
         context['selected_delivery_status'] = self.request.GET.get('delivery_status', '')
+        context['selected_customer'] = self.request.GET.get('customer', '')
+        context['selected_sales_employee'] = self.request.GET.get('sales_employee', '')
         context['status_choices'] = SalesOrder.STATUS_CHOICES
         context['delivery_status_choices'] = SalesOrder.DELIVERY_STATUS_CHOICES
+        context['customers'] = CustomerVendor.objects.filter(entity_type='customer').order_by('name')
+        context['sales_employees'] = SalesEmployee.objects.order_by('full_name')
         return context
 class SalesOrderItemDetailedListView(ListView):
     model = SalesOrderItem

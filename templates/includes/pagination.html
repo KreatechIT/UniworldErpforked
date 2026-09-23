@@ -55,5 +55,12 @@
                 {% endif %}
             </nav>
         </div>
+        <form method="get" class="flex items-center gap-2"
+              onsubmit="event.preventDefault(); const n = Math.max(1, Math.min({{ paginator.num_pages }}, parseInt(this.gotoPage.value) || 1)); window.location.href = '?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page=' + n;">
+            <label class="text-sm text-[hsl(var(--muted-foreground))] whitespace-nowrap">Go to page</label>
+            <input type="number" name="gotoPage" min="1" max="{{ paginator.num_pages }}" placeholder="{{ page_obj.number }}"
+                   class="w-16 px-2 py-1 text-sm rounded-md border border-[hsl(var(--border))] text-gray-900">
+            <button type="submit" class="px-3 py-1 text-sm rounded-md border border-[hsl(var(--border))] bg-gradient-to-br from-[#a31319] to-black text-white hover:bg-[hsl(var(--muted))]">Go</button>
+        </form>
     </div>
 </div>

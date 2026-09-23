@@ -1556,6 +1556,96 @@ textarea.form-input {
             });
             return false;
         };
+
+        // Wires up a "date_range_filter.html" include: a single button showing
+        // the current from/to range, a small popup with two date inputs, and
+        // two hidden inputs (start_date/end_date) that the form actually submits.
+        // wrapperId lets a page host more than one of these at once.
+        window.initDateRangePicker = function(wrapperId) {
+            const wrapper = document.getElementById(wrapperId);
+            if (!wrapper) return;
+            const button = wrapper.querySelector('.date-range-button');
+            const label = wrapper.querySelector('.date-range-label');
+            const popup = wrapper.querySelector('.date-range-popup');
+            const fromInput = wrapper.querySelector('.date-range-from');
+            const toInput = wrapper.querySelector('.date-range-to');
+            const startHidden = wrapper.querySelector('.date-range-start-hidden');
+            const endHidden = wrapper.querySelector('.date-range-end-hidden');
+            const clearBtn = wrapper.querySelector('.date-range-clear');
+            const applyBtn = wrapper.querySelector('.date-range-apply');
+
+            // dd/mm/yyyy is a plain masked text input, not a native date input -
+            // Chromium's date input format follows the browser/OS locale, not
+            // the element's lang attribute, so it can't be forced that way.
+            function toDMY(isoDate) {
+                if (!isoDate) return '';
+                const parts = isoDate.split('-');
+                return parts.length === 3 ? (parts[2] + '/' + parts[1] + '/' + parts[0]) : isoDate;
+            }
+
+            function toISO(dmy) {
+                const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(dmy || '');
+                return match ? (match[3] + '-' + match[2] + '-' + match[1]) : '';
+            }
+
+            function attachDateMask(input) {
+                input.addEventListener('input', function() {
+                    const digits = input.value.replace(/\D/g, '').slice(0, 8);
+                    if (digits.length > 4) {
+                        input.value = digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4);
+                    } else if (digits.length > 2) {
+                        input.value = digits.slice(0, 2) + '/' + digits.slice(2);
+                    } else {
+                        input.value = digits;
+                    }
+                });
+            }
+            attachDateMask(fromInput);
+            attachDateMask(toInput);
+
+            function updateLabel() {
+                if (startHidden.value && endHidden.value) {
+                    label.textContent = startHidden.value === endHidden.value ? toDMY(startHidden.value) : (toDMY(startHidden.value) + ' to ' + toDMY(endHidden.value));
+                } else if (startHidden.value || endHidden.value) {
+                    label.textContent = (toDMY(startHidden.value) || '...') + ' to ' + (toDMY(endHidden.value) || '...');
+                } else {
+                    label.textContent = 'All dates';
+                }
+            }
+
+            fromInput.value = toDMY(startHidden.value);
+            toInput.value = toDMY(endHidden.value);
+            updateLabel();
+
+            button.addEventListener('click', function(e) {
+                e.preventDefault();
+                popup.classList.toggle('hidden');
+            });
+
+            applyBtn.addEventListener('click', function() {
+                startHidden.value = toISO(fromInput.value);
+                endHidden.value = toISO(toInput.value);
+                updateLabel();
+                popup.classList.add('hidden');
+                wrapper.closest('form').submit();
+            });
+
+            clearBtn.addEventListener('click', function() {
+                fromInput.value = '';
+                toInput.value = '';
+                startHidden.value = '';
+                endHidden.value = '';
+                updateLabel();
+                popup.classList.add('hidden');
+                wrapper.closest('form').submit();
+            });
+
+            document.addEventListener('click', function(e) {
+                if (!wrapper.contains(e.target)) {
+                    popup.classList.add('hidden');
+                }
+            });
+        };
     </script>
 
     {% block extra_js %}

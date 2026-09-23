@@ -275,13 +275,17 @@ class SalesOrderForm(forms.ModelForm):
         super().__init__(*args, **kwargs)
         self.restrict_customers = bool(user and not user.is_superuser)
 
+        self.order_fields(['sales_employee', 'customer'])
+
         customers = CustomerVendor.objects.filter(entity_type='customer').order_by('name')
         employees = SalesEmployee.objects.all().order_by('full_name')
 
+        linked_employee = getattr(user, 'sales_employee', None) if user else None
+        if linked_employee and not self.instance.pk:
+            self.initial['sales_employee'] = linked_employee.pk
+
         if self.restrict_customers:
-            self.order_fields(['sales_employee', 'customer'])
             self.fields['sales_employee'].required = True
-            linked_employee = getattr(user, 'sales_employee', None)
             if linked_employee:
                 employees = employees.filter(
                     Q(pk=linked_employee.pk) | Q(pk=self.instance.sales_employee_id)
@@ -289,8 +293,6 @@ class SalesOrderForm(forms.ModelForm):
                 customers = customers.filter(
                     Q(sales_employee=linked_employee) | Q(pk=self.instance.customer_id)
                 )
-                if not self.instance.pk:
-                    self.initial['sales_employee'] = linked_employee.pk
             else:
                 customers = customers.filter(
                     Q(sales_employee__isnull=False) | Q(pk=self.instance.customer_id)
