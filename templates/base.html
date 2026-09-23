@@ -297,10 +297,10 @@ textarea.form-input {
     scrollbar-color: hsl(var(--primary)) hsl(var(--muted));
 }
 
-/* Custom scrollbar styles for table */
+/* Custom scrollbar styles for table - horizontal only, so the table flows
+   with the page instead of being boxed into a small fixed-height window. */
 .table-container {
-    max-height: 400px; /* Adjust as needed */
-    overflow-y: auto;
+    overflow-x: auto;
 }
 
 .table-container::-webkit-scrollbar {
@@ -1543,6 +1543,18 @@ textarea.form-input {
                 okBtn.addEventListener('click', onOk);
                 cancelBtn.addEventListener('click', onCancel);
             });
+        };
+
+        // Generic helper for "confirm, then submit this form" buttons - e.g.
+        // <form onsubmit="return appConfirmSubmit(event, this, 'Are you sure?');">
+        window.appConfirmSubmit = function(event, form, message, options) {
+            event.preventDefault();
+            window.appConfirm(message, options).then(function(ok) {
+                if (ok) {
+                    form.submit();
+                }
+            });
+            return false;
         };
     </script>
 

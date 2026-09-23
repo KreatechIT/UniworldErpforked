@@ -12,6 +12,8 @@
                 {% if object %}
                     {% if object.status == 'confirmed' %}
                         <span class="px-3 py-1 text-xs font-semibold rounded-full bg-green-800 text-green-100">Confirmed - locked, can't be edited or deleted</span>
+                    {% elif object.status == 'cancelled' %}
+                        <span class="px-3 py-1 text-xs font-semibold rounded-full bg-red-900 text-red-100">Cancelled</span>
                     {% else %}
                         <span class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-600 text-gray-100">Draft</span>
                     {% endif %}
@@ -228,6 +230,25 @@
                         {% endif %}
                     </div>
                 </form>
+
+                {% if action == 'View' and object.status == 'draft' and perms.uniworlderp.change_salesorder %}
+                <form method="post" action="{% url 'customer_vendor:sales_order_confirm' object.pk %}" class="flex justify-end mt-4"
+                      onsubmit="return appConfirmSubmit(event, this, 'You are confirming this sales order. An invoice will be created and the sales order will be locked. Continue?', {title: 'Confirm Sales Order', confirmText: 'Confirm Order'});">
+                    {% csrf_token %}
+                    <button type="submit" class="px-6 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800">
+                        Confirm Order
+                    </button>
+                </form>
+                {% endif %}
+                {% if action == 'View' and object.status == 'confirmed' and perms.uniworlderp.change_salesorder %}
+                <form method="post" action="{% url 'customer_vendor:sales_order_cancel' object.pk %}" class="flex justify-end mt-4"
+                      onsubmit="return appConfirmSubmit(event, this, 'This will cancel the confirmed order and return its stock. Continue?', {title: 'Cancel Sales Order', confirmText: 'Cancel Order'});">
+                    {% csrf_token %}
+                    <button type="submit" class="px-6 py-2 bg-orange-700 text-white rounded-lg hover:bg-orange-800">
+                        Cancel Order
+                    </button>
+                </form>
+                {% endif %}
             </div>
         </div>
     </div>

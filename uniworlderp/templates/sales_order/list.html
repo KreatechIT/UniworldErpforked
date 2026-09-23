@@ -17,15 +17,33 @@
                 </a>
             </div>
         
-            <!-- Search Form -->
-            <form method="get" action="{% url 'customer_vendor:sales_order_list' %}" class="relative w-full sm:w-auto mt-4 sm:mt-0">
-                <input type="text" name="search" placeholder="Search sales orders..." class="pl-10 pr-4 py-3 border border-[hsl(var(--border))] rounded-md focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:w-72 sm:text-sm bg-[hsl(var(--background))]" value="{{ request.GET.search }}">
-                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <i class="ri-search-line text-[hsl(var(--muted-foreground))]"></i>
+            <!-- Search + Filter Form -->
+            <form method="get" action="{% url 'customer_vendor:sales_order_list' %}" class="flex flex-col sm:flex-row items-center gap-2 w-full sm:w-auto mt-4 sm:mt-0">
+                <div class="relative w-full sm:w-auto">
+                    <input type="text" name="search" placeholder="Search sales orders..." class="pl-10 pr-4 py-3 border border-[hsl(var(--border))] rounded-md focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:w-72 sm:text-sm bg-[hsl(var(--background))]" value="{{ request.GET.search }}">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <i class="ri-search-line text-[hsl(var(--muted-foreground))]"></i>
+                    </div>
                 </div>
+                <select name="status" onchange="this.form.submit()" class="form-input py-3 w-full sm:w-auto bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm">
+                    <option value="">All Order Statuses</option>
+                    {% for value, label in status_choices %}
+                        <option value="{{ value }}" {% if selected_status == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <select name="delivery_status" onchange="this.form.submit()" class="form-input py-3 w-full sm:w-auto bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm">
+                    <option value="">All Delivery Statuses</option>
+                    {% for value, label in delivery_status_choices %}
+                        <option value="{{ value }}" {% if selected_delivery_status == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <button type="submit" class="px-4 py-3 bg-gray-700 text-white rounded-md hover:bg-gray-600 text-sm">Filter</button>
+                {% if request.GET.search or selected_status or selected_delivery_status %}
+                    <a href="{% url 'customer_vendor:sales_order_list' %}" class="px-4 py-3 bg-gray-500 text-white rounded-md hover:bg-gray-400 text-sm whitespace-nowrap">Clear</a>
+                {% endif %}
             </form>
         </div>
-        
+
         
         
         <div class="overflow-x-auto  table-container">
@@ -63,6 +81,8 @@
                                     <td class="px-6 py-4 whitespace-nowrap">
                                         {% if sales_order.status == 'confirmed' %}
                                             <span class="px-2 py-1 text-xs font-semibold rounded-full bg-green-800 text-green-100">Confirmed</span>
+                                        {% elif sales_order.status == 'cancelled' %}
+                                            <span class="px-2 py-1 text-xs font-semibold rounded-full bg-red-900 text-red-100">Cancelled</span>
                                         {% else %}
                                             <span class="px-2 py-1 text-xs font-semibold rounded-full bg-gray-600 text-gray-100">Draft</span>
                                         {% endif %}
@@ -85,12 +105,22 @@
                                                 <i class="ri-printer-line mr-1"></i>Print
                                             </a>
                                             {% if perms.uniworlderp.delete_salesorder and sales_order.status == 'draft' %}
-                                            <form method="post" action="{% url 'customer_vendor:sales_order_delete' sales_order.pk %}" class="inline">
+                                            <form method="post" action="{% url 'customer_vendor:sales_order_delete' sales_order.pk %}" class="inline"
+                                                  onsubmit="return appConfirmSubmit(event, this, 'Are you sure you want to delete this sales order?', {title: 'Delete Sales Order', confirmText: 'Delete'});">
                                                 {% csrf_token %}
                                                 <button type="submit"
-                                                        class="px-2 py-1 text-xs font-semibold rounded-full bg-red-800 text-red-100 hover:bg-red-700"
-                                                        onclick="return confirm('Are you sure you want to delete this sales order?');">
+                                                        class="px-2 py-1 text-xs font-semibold rounded-full bg-red-800 text-red-100 hover:bg-red-700">
                                                     <i class="ri-delete-bin-line mr-1"></i>Delete
+                                                </button>
+                                            </form>
+                                            {% endif %}
+                                            {% if perms.uniworlderp.change_salesorder and sales_order.status == 'confirmed' %}
+                                            <form method="post" action="{% url 'customer_vendor:sales_order_cancel' sales_order.pk %}" class="inline"
+                                                  onsubmit="return appConfirmSubmit(event, this, 'This will cancel the confirmed order and return its stock. Continue?', {title: 'Cancel Sales Order', confirmText: 'Cancel Order'});">
+                                                {% csrf_token %}
+                                                <button type="submit"
+                                                        class="px-2 py-1 text-xs font-semibold rounded-full bg-orange-800 text-orange-100 hover:bg-orange-700">
+                                                    <i class="ri-close-circle-line mr-1"></i>Cancel
                                                 </button>
                                             </form>
                                             {% endif %}

@@ -39,16 +39,26 @@
                                             </a>
                                             {% endif %}
                                             {% if perms.uniworlderp.delete_salesorder and order.status == 'draft' %}
-                                            <form method="post" action="{% url 'customer_vendor:sales_order_delete' order.pk %}" class="inline">
+                                            <form method="post" action="{% url 'customer_vendor:sales_order_delete' order.pk %}" class="inline"
+                                                  onsubmit="return appConfirmSubmit(event, this, 'Are you sure you want to delete this sales order?', {title: 'Delete Sales Order', confirmText: 'Delete'});">
                                                 {% csrf_token %}
                                                 <button type="submit"
-                                                        class="px-2 py-1 text-xs font-semibold rounded-full bg-red-800 text-red-100 hover:bg-red-700"
-                                                        onclick="return confirm('Are you sure you want to delete this sales order?');">
+                                                        class="px-2 py-1 text-xs font-semibold rounded-full bg-red-800 text-red-100 hover:bg-red-700">
                                                     <i class="ri-delete-bin-line mr-1"></i>Delete
                                                 </button>
                                             </form>
                                             {% endif %}
-                                            <a href="{% url 'customer_vendor:sales_order_view' order.pk %}" 
+                                            {% if perms.uniworlderp.change_salesorder and order.status == 'confirmed' %}
+                                            <form method="post" action="{% url 'customer_vendor:sales_order_cancel' order.pk %}" class="inline"
+                                                  onsubmit="return appConfirmSubmit(event, this, 'This will cancel the confirmed order and return its stock. Continue?', {title: 'Cancel Sales Order', confirmText: 'Cancel Order'});">
+                                                {% csrf_token %}
+                                                <button type="submit"
+                                                        class="px-2 py-1 text-xs font-semibold rounded-full bg-orange-800 text-orange-100 hover:bg-orange-700">
+                                                    <i class="ri-close-circle-line mr-1"></i>Cancel
+                                                </button>
+                                            </form>
+                                            {% endif %}
+                                            <a href="{% url 'customer_vendor:sales_order_view' order.pk %}"
                                                class="px-2 py-1 text-xs font-semibold rounded-full bg-gray-800 text-gray-100 hover:bg-gray-700">
                                                 <i class="ri-eye-line mr-1"></i>View
                                             </a>

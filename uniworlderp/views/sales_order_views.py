@@ -10,6 +10,25 @@ from uniworlderp.models import ReturnSales, ReturnSalesItem, SalesOrder, SalesOr
 from uniworlderp.forms import ReturnSalesForm, ReturnSalesItemFormSet, SalesOrderForm, SalesOrderItemFormSet, get_return_sales_item_formset
 from company.models import Company, Branch, ContactPerson
 
+
+def get_stock_shortages(order):
+    """Checks a sales order's items against real stock. Returns a list of
+    human-readable shortage strings, empty if everything fits. Used to block
+    confirming an order that asks for more than is actually in stock - a
+    draft is allowed to overstock, but confirming is not."""
+    needed = {}
+    for item in order.order_items.select_related('product'):
+        needed[item.product_id] = needed.get(item.product_id, 0) + item.quantity
+
+    shortages = []
+    for product in Product.objects.filter(id__in=needed.keys()):
+        qty_needed = needed[product.id]
+        if product.stock_quantity < qty_needed:
+            shortages.append(
+                f"{product.name}: only {product.stock_quantity} in stock, but {qty_needed} requested"
+            )
+    return shortages
+
 class SalesOrderListView(ListView):
     model = SalesOrder
     template_name = 'sales_order/list.html'
@@ -18,6 +37,8 @@ class SalesOrderListView(ListView):
 
     def get_queryset(self):
         search_query = self.request.GET.get('search', '')
+        status = self.request.GET.get('status', '')
+        delivery_status = self.request.GET.get('delivery_status', '')
 
         queryset = SalesOrder.objects.all().order_by('-id')
 
@@ -28,17 +49,20 @@ class SalesOrderListView(ListView):
                 Q(sales_employee__user__username__icontains=search_query) |
                 Q(order_date__icontains=search_query)
             )
+        if status:
+            queryset = queryset.filter(status=status)
+        if delivery_status:
+            queryset = queryset.filter(delivery_status=delivery_status)
 
         return queryset
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['search_query'] = self.request.GET.get('search', '')
-        return context
-
-    def get_context_data(self, **kwargs):
-        context = super().get_context_data(**kwargs)
-        context['search_query'] = self.request.GET.get('search', '')
+        context['selected_status'] = self.request.GET.get('status', '')
+        context['selected_delivery_status'] = self.request.GET.get('delivery_status', '')
+        context['status_choices'] = SalesOrder.STATUS_CHOICES
+        context['delivery_status_choices'] = SalesOrder.DELIVERY_STATUS_CHOICES
         return context
 class SalesOrderItemDetailedListView(ListView):
     model = SalesOrderItem
@@ -107,12 +131,16 @@ class SalesOrderCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateVi
                     formset.instance = self.object
                     formset.save()
                     if self.request.POST.get('action') == 'confirm':
-                        self.object.status = 'confirmed'
-                        self.object.save(update_fields=['status'])
-                if self.object.status == 'confirmed':
-                    messages.success(self.request, 'Sales Order created and confirmed successfully.')
-                else:
-                    messages.success(self.request, 'Sales Order saved as draft.')
+                        shortages = get_stock_shortages(self.object)
+                        if shortages:
+                            messages.error(self.request, "Can't confirm - not enough stock: " + "; ".join(shortages))
+                            messages.success(self.request, 'Sales Order saved as draft instead.')
+                        else:
+                            self.object.status = 'confirmed'
+                            self.object.save(update_fields=['status'])
+                            messages.success(self.request, 'Sales Order created and confirmed successfully.')
+                    else:
+                        messages.success(self.request, 'Sales Order saved as draft.')
                 return super().form_valid(form)
             except Exception as e:
                 messages.error(self.request, f'Error creating Sales Order: {str(e)}')
@@ -164,8 +192,8 @@ class SalesOrderUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateVi
 
     def dispatch(self, request, *args, **kwargs):
         self.object = self.get_object()
-        if self.object.status == 'confirmed':
-            messages.error(request, "This order is confirmed and locked. It can't be edited.")
+        if self.object.status != 'draft':
+            messages.error(request, f"This order is {self.object.get_status_display().lower()} and locked. It can't be edited.")
             return redirect('customer_vendor:sales_order_view', pk=self.object.pk)
         return super().dispatch(request, *args, **kwargs)
 
@@ -281,7 +309,19 @@ class SalesOrderUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateVi
             print("\n" + "="*80)
             print("SALES ORDER UPDATE - COMPLETED SUCCESSFULLY")
             print("="*80 + "\n")
-            
+
+            if self.request.POST.get('action') == 'confirm':
+                shortages = get_stock_shortages(self.object)
+                if shortages:
+                    messages.error(self.request, "Can't confirm - not enough stock: " + "; ".join(shortages))
+                    messages.success(self.request, 'Sales Order saved as draft instead.')
+                else:
+                    self.object.status = 'confirmed'
+                    self.object.save(update_fields=['status'])
+                    messages.success(self.request, 'Sales Order confirmed successfully.')
+            else:
+                messages.success(self.request, 'Sales Order saved as draft.')
+
             return super().form_valid(form)
         else:
             print("\n❌ FORMSET VALIDATION FAILED")
@@ -366,8 +406,8 @@ class SalesOrderDeleteView(LoginRequiredMixin, PermissionRequiredMixin, DeleteVi
 
     def dispatch(self, request, *args, **kwargs):
         self.object = self.get_object()
-        if self.object.status == 'confirmed':
-            messages.error(request, "This order is confirmed and locked. It can't be deleted.")
+        if self.object.status != 'draft':
+            messages.error(request, f"This order is {self.object.get_status_display().lower()} and locked. It can't be deleted.")
             return redirect('customer_vendor:sales_order_view', pk=self.object.pk)
         return super().dispatch(request, *args, **kwargs)
 
@@ -385,6 +425,65 @@ class SalesOrderDeleteView(LoginRequiredMixin, PermissionRequiredMixin, DeleteVi
         context['model_name'] = self.model._meta.verbose_name.title()
         context['cancel_url'] = reverse_lazy('customer_vendor:sales_order_list')
         return context
+
+@method_decorator(require_POST, name='dispatch')
+class SalesOrderCancelView(LoginRequiredMixin, PermissionRequiredMixin, View):
+    """Undoes an accidental confirm: returns the order's stock and marks it
+    Cancelled. The order itself is never deleted, so the record (and any
+    invoice number tied to it later) stays intact for the audit trail."""
+    permission_required = 'uniworlderp.change_salesorder'
+
+    def handle_no_permission(self):
+        messages.error(self.request, "You do not have permission to cancel this sales order.")
+        return redirect('customer_vendor:sales_order_list')
+
+    @transaction.atomic
+    def post(self, request, pk):
+        order = get_object_or_404(SalesOrder, pk=pk)
+        if order.status != 'confirmed':
+            messages.error(request, "Only a confirmed order can be cancelled.")
+            return redirect('customer_vendor:sales_order_view', pk=order.pk)
+
+        for item in order.order_items.all():
+            StockTransaction.objects.create(
+                product=item.product,
+                transaction_type='RET',
+                quantity=item.quantity,
+                reference=f"SO-{order.id}-Cancelled",
+                owner=order.owner,
+            )
+
+        order.status = 'cancelled'
+        order.save(update_fields=['status'])
+        messages.success(request, f"Sales Order #{order.id} has been cancelled and its stock returned.")
+        return redirect('customer_vendor:sales_order_view', pk=order.pk)
+
+@method_decorator(require_POST, name='dispatch')
+class SalesOrderConfirmView(LoginRequiredMixin, PermissionRequiredMixin, View):
+    """Confirms a draft straight from the view page, without reopening the
+    full edit form - same stock check and lock as confirming from the form."""
+    permission_required = 'uniworlderp.change_salesorder'
+
+    def handle_no_permission(self):
+        messages.error(self.request, "You do not have permission to confirm this sales order.")
+        return redirect('customer_vendor:sales_order_list')
+
+    @transaction.atomic
+    def post(self, request, pk):
+        order = get_object_or_404(SalesOrder, pk=pk)
+        if order.status != 'draft':
+            messages.error(request, "Only a draft order can be confirmed.")
+            return redirect('customer_vendor:sales_order_view', pk=order.pk)
+
+        shortages = get_stock_shortages(order)
+        if shortages:
+            messages.error(request, "Can't confirm - not enough stock: " + "; ".join(shortages))
+            return redirect('customer_vendor:sales_order_view', pk=order.pk)
+
+        order.status = 'confirmed'
+        order.save(update_fields=['status'])
+        messages.success(request, f"Sales Order #{order.id} confirmed successfully.")
+        return redirect('customer_vendor:sales_order_view', pk=order.pk)
 
 class SalesOrderPrintView(LoginRequiredMixin, DetailView):
     model = SalesOrder

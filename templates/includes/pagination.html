@@ -1,18 +1,24 @@
-<div class="bg-gradient-to-br from-[#a31319] to-black px-4 py-3 flex items-center justify-between border-t border-[hsl(var(--border))] sm:px-6">
+{% load pagination_extras %}
+<div class="bg-gradient-to-br from-[#a31319] to-black px-4 py-3 flex items-center justify-end border-t border-[hsl(var(--border))] sm:px-6">
     <!-- Pagination -->
-    <div class="flex-1 flex justify-between sm:hidden">
+    <div class="flex-1 flex items-center justify-between sm:hidden">
         {% if page_obj.has_previous %}
             <a href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ page_obj.previous_page_number }}" class="relative inline-flex items-center px-4 py-2 border border-[hsl(var(--border))] text-sm font-medium rounded-md text-white bg-gradient-to-br from-[#a31319] to-black hover:bg-[hsl(var(--muted))]">
                 Previous
             </a>
+        {% else %}
+            <span></span>
         {% endif %}
+        <span class="text-sm text-[hsl(var(--muted-foreground))]">Page {{ page_obj.number }} of {{ paginator.num_pages }}</span>
         {% if page_obj.has_next %}
-            <a href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ page_obj.next_page_number }}" class="ml-3 relative inline-flex items-center px-4 py-2 border border-[hsl(var(--border))] text-sm font-medium rounded-md text-white bg-gradient-to-br from-[#a31319] to-black hover:bg-[hsl(var(--muted))]">
+            <a href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ page_obj.next_page_number }}" class="relative inline-flex items-center px-4 py-2 border border-[hsl(var(--border))] text-sm font-medium rounded-md text-white bg-gradient-to-br from-[#a31319] to-black hover:bg-[hsl(var(--muted))]">
                 Next
             </a>
+        {% else %}
+            <span></span>
         {% endif %}
     </div>
-    <div class="hidden sm:flex-1 sm:flex sm:items-center sm:justify-between">
+    <div class="hidden sm:flex sm:items-center sm:justify-end sm:gap-6">
         <div>
             <p class="text-sm text-[hsl(var(--muted-foreground))]">
                 Showing <span class="font-medium">{{ page_obj.start_index }}</span> to <span class="font-medium">{{ page_obj.end_index }}</span> of <span class="font-medium">{{ paginator.count }}</span> results
@@ -26,8 +32,12 @@
                         <i class="ri-arrow-left-s-line"></i>
                     </a>
                 {% endif %}
-                {% for num in page_obj.paginator.page_range %}
-                    {% if page_obj.number == num %}
+                {% for num in page_obj|elided_range %}
+                    {% if num == page_obj.paginator.ELLIPSIS %}
+                        <span class="bg-gradient-to-br from-[#a31319] to-black border-[hsl(var(--border))] text-white relative inline-flex items-center px-4 py-2 border text-sm font-medium">
+                            {{ num }}
+                        </span>
+                    {% elif page_obj.number == num %}
                         <a href="?{% for key, value in request.GET.items %}{% if key != 'page' %}{{ key }}={{ value }}&{% endif %}{% endfor %}page={{ num }}" aria-current="page" class="z-10 bg-gradient-to-br from-[#a31319] to-black border-indigo-500 text-indigo-600 relative inline-flex items-center px-4 py-2 border text-sm font-medium">
                             {{ num }}
                         </a>

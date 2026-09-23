@@ -1,6 +1,5 @@
 from django.urls import path
 from uniworlderp.views import customer_views, sales_employee_views,product_views,sales_order_views,invoice_views,purchase_views,materials_purchase_views,report_views
-from uniworlderp.views import sales_order_report_views
 from . import views
 
 app_name = 'customer_vendor'
@@ -43,6 +42,7 @@ urlpatterns = [
     path('sales-orders/view/<int:pk>/', sales_order_views.SalesOrderDetailView.as_view(), name='sales_order_view'),
     path('sales-orders/delete/<int:pk>/', sales_order_views.SalesOrderDeleteView.as_view(), name='sales_order_delete'),
     path('sales-orders/cancel/<int:pk>/', sales_order_views.SalesOrderCancelView.as_view(), name='sales_order_cancel'),
+    path('sales-orders/confirm/<int:pk>/', sales_order_views.SalesOrderConfirmView.as_view(), name='sales_order_confirm'),
     path('sales-orders/print/<int:pk>/', sales_order_views.SalesOrderPrintView.as_view(), name='sales_order_print'),
     path('sales-orders/detailed/', sales_order_views.SalesOrderItemDetailedListView.as_view(), name='sales_order_detailed_list'),
     
@@ -94,16 +94,4 @@ urlpatterns = [
     path('reports/customers/print/', report_views.CustomerReportPrintView.as_view(), name='customer_report_print'),
     path('reports/customers/excel/', report_views.CustomerReportExcelView.as_view(), name='customer_report_excel'),
     
-    path('reports/sales-orders/', sales_order_report_views.SalesOrderReportView.as_view(), name='sales_order_report'),
-    path('reports/sales-orders/print/', sales_order_report_views.SalesOrderReportPrintView.as_view(), name='sales_order_report_print'),
-    path('reports/sales-orders/excel/', sales_order_report_views.SalesOrderReportExcelView.as_view(), name='sales_order_report_excel'),
-    
-    path('reports/product-wise/', report_views.ProductWiseReportView.as_view(), name='product_wise_report'),
-    path('reports/product-wise/print/', report_views.ProductWiseReportPrintView.as_view(), name='product_wise_report_print'),
-    path('reports/product-wise/excel/', report_views.ProductWiseReportExcelView.as_view(), name='product_wise_report_excel'),
-    
-    path('reports/customer-wise/', report_views.CustomerWiseReportView.as_view(), name='customer_wise_report'),
-    path('reports/customer-wise/print/', report_views.CustomerWiseReportPrintView.as_view(), name='customer_wise_report_print'),
-    path('reports/customer-wise/excel/', report_views.CustomerWiseReportExcelView.as_view(), name='customer_wise_report_excel'),
-
 ]
