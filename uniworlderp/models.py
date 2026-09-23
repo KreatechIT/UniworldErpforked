@@ -239,11 +239,18 @@ class SalesOrder(models.Model):
         ('D', 'Delivered'),
     ]
 
+    STATUS_CHOICES = [
+        ('draft', 'Draft'),
+        ('confirmed', 'Confirmed'),
+        ('cancelled', 'Cancelled'),
+    ]
+
     id = models.BigAutoField(primary_key=True)
     customer = models.ForeignKey('CustomerVendor', on_delete=models.CASCADE, related_name='sales_orders')
     sales_employee = models.ForeignKey('SalesEmployee', on_delete=models.SET_NULL, null=True, blank=True, related_name='sales_orders')
     order_date = models.DateField(default=timezone.now, db_index=True)
     delivery_status = models.CharField(max_length=1, choices=DELIVERY_STATUS_CHOICES, default='P')
+    status = models.CharField(max_length=10, choices=STATUS_CHOICES, default='draft', db_index=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='sales_orders')

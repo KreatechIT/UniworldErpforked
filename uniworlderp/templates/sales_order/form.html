@@ -7,8 +7,15 @@
         <!-- Card Container -->
         <div class="bg-white bg-opacity-10 backdrop-filter backdrop-blur-lg rounded-lg shadow-xl overflow-hidden border border-white border-opacity-20">
             <!-- Card Header -->
-            <div class="bg-gradient-to-br from-[#a31319] to-black text-white px-6 py-4">
+            <div class="bg-gradient-to-br from-[#a31319] to-black text-white px-6 py-4 flex items-center justify-between">
                 <h2 class="text-xl font-semibold text-white">Sales Order</h2>
+                {% if object %}
+                    {% if object.status == 'confirmed' %}
+                        <span class="px-3 py-1 text-xs font-semibold rounded-full bg-green-800 text-green-100">Confirmed - locked, can't be edited or deleted</span>
+                    {% else %}
+                        <span class="px-3 py-1 text-xs font-semibold rounded-full bg-gray-600 text-gray-100">Draft</span>
+                    {% endif %}
+                {% endif %}
             </div>
 
             <!-- Card Content -->
@@ -209,11 +216,16 @@
                     <!-- Submit Button -->
                     <div class="flex justify-end space-x-4 mt-6">
                         <button type="button" onclick="history.back()" class="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
-                            Cancel
+                            {% if action == 'View' %}Back{% else %}Cancel{% endif %}
                         </button>
-                        <button type="submit" class="px-6 py-2 bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] rounded-lg hover:bg-opacity-90">
-                            Save Order
+                        {% if action != 'View' %}
+                        <button type="submit" name="action" value="draft" class="px-6 py-2 bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] rounded-lg hover:bg-opacity-90">
+                            Save as Draft
                         </button>
+                        <button type="submit" name="action" value="confirm" data-confirm-message="You are confirming this sales order. An invoice will be created and the sales order will be locked. Continue?" class="px-6 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800">
+                            Confirm Order
+                        </button>
+                        {% endif %}
                     </div>
                 </form>
             </div>
@@ -840,13 +852,25 @@
         return true;
     }
 
-    document.querySelector('form').addEventListener('submit', function(e) {
+    document.querySelector('form').addEventListener('submit', async function(e) {
+        // e.submitter is the button that triggered this submit - programmatic
+        // this.submit() below loses it otherwise, so the server would never
+        // see which button (Save as Draft vs Confirm Order) was clicked.
+        const submitter = e.submitter;
+        const clickedAction = submitter && submitter.name === 'action' ? submitter.value : null;
         e.preventDefault();
-        
+
+        if (submitter && submitter.dataset.confirmMessage) {
+            const confirmed = await window.appConfirm(submitter.dataset.confirmMessage, { confirmText: 'Confirm Order', title: 'Confirm Sales Order' });
+            if (!confirmed) {
+                return;
+            }
+        }
+
         const rows = orderItemsFormset.querySelectorAll('.formset-row');
         let hasValidData = false;
         let allRowsValid = true;
-        
+
         rows.forEach(row => {
             if (row.style.display !== 'none') { // Only check visible rows
                 if (!isRowEmpty(row)) {
@@ -857,18 +881,27 @@
                 }
             }
         });
-        
+
         if (!hasValidData) {
             alert('Please add at least one product to the order.');
             return;
         }
-        
+
         if (!allRowsValid) {
             alert('Please ensure all products are properly selected and all required fields are filled.');
             return;
         }
-        
+
         removeEmptyRows();
+
+        if (clickedAction) {
+            const actionInput = document.createElement('input');
+            actionInput.type = 'hidden';
+            actionInput.name = 'action';
+            actionInput.value = clickedAction;
+            this.appendChild(actionInput);
+        }
+
         this.submit();
     });
 

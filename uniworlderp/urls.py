@@ -41,8 +41,9 @@ urlpatterns = [
     path('sales-orders/create/', sales_order_views.SalesOrderCreateView.as_view(), name='sales_order_create'),
     path('sales-orders/update/<int:pk>/', sales_order_views.SalesOrderUpdateView.as_view(), name='sales_order_update'),
     path('sales-orders/view/<int:pk>/', sales_order_views.SalesOrderDetailView.as_view(), name='sales_order_view'),
-    path('sales-orders/delete/<int:pk>/', sales_order_views.SalesOrderDeleteView.as_view(), name='sales_order_delete'),    
-    path('sales-orders/print/<int:pk>/', sales_order_views.SalesOrderPrintView.as_view(), name='sales_order_print'),     
+    path('sales-orders/delete/<int:pk>/', sales_order_views.SalesOrderDeleteView.as_view(), name='sales_order_delete'),
+    path('sales-orders/cancel/<int:pk>/', sales_order_views.SalesOrderCancelView.as_view(), name='sales_order_cancel'),
+    path('sales-orders/print/<int:pk>/', sales_order_views.SalesOrderPrintView.as_view(), name='sales_order_print'),
     path('sales-orders/detailed/', sales_order_views.SalesOrderItemDetailedListView.as_view(), name='sales_order_detailed_list'),
     
     path('sales-orders/return/<int:sales_order_id>/', sales_order_views.ReturnSalesCreateView.as_view(), name='sales_order_return'),

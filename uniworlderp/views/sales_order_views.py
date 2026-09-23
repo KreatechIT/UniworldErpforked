@@ -106,7 +106,13 @@ class SalesOrderCreateView(LoginRequiredMixin, PermissionRequiredMixin, CreateVi
                     self.object.save()
                     formset.instance = self.object
                     formset.save()
-                messages.success(self.request, 'Sales Order created successfully.')
+                    if self.request.POST.get('action') == 'confirm':
+                        self.object.status = 'confirmed'
+                        self.object.save(update_fields=['status'])
+                if self.object.status == 'confirmed':
+                    messages.success(self.request, 'Sales Order created and confirmed successfully.')
+                else:
+                    messages.success(self.request, 'Sales Order saved as draft.')
                 return super().form_valid(form)
             except Exception as e:
                 messages.error(self.request, f'Error creating Sales Order: {str(e)}')
@@ -155,6 +161,13 @@ class SalesOrderUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateVi
     template_name = 'sales_order/form.html'
     success_url = reverse_lazy('customer_vendor:sales_order_list')
     permission_required = 'uniworlderp.change_salesorder'
+
+    def dispatch(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        if self.object.status == 'confirmed':
+            messages.error(request, "This order is confirmed and locked. It can't be edited.")
+            return redirect('customer_vendor:sales_order_view', pk=self.object.pk)
+        return super().dispatch(request, *args, **kwargs)
 
     def get_form_kwargs(self):
         kwargs = super().get_form_kwargs()
@@ -350,6 +363,13 @@ class SalesOrderDeleteView(LoginRequiredMixin, PermissionRequiredMixin, DeleteVi
     def handle_no_permission(self):
         messages.error(self.request, "You do not have permission to delete this sales order.")
         return redirect('customer_vendor:sales_order_list')
+
+    def dispatch(self, request, *args, **kwargs):
+        self.object = self.get_object()
+        if self.object.status == 'confirmed':
+            messages.error(request, "This order is confirmed and locked. It can't be deleted.")
+            return redirect('customer_vendor:sales_order_view', pk=self.object.pk)
+        return super().dispatch(request, *args, **kwargs)
 
     @transaction.atomic
     def delete(self, request, *args, **kwargs):
