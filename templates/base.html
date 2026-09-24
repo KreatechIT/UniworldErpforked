@@ -947,6 +947,12 @@ textarea.form-input {
                         <span>Payments</span>
                     </a>
                 {% endif %}
+                {% if show_invoice_menu %}
+                    <a href="{% url 'customer_vendor:ledger' %}" class="nav-link">
+                        <i class="ri-book-2-line"></i>
+                        <span>Ledger</span>
+                    </a>
+                {% endif %}
                 {% if show_purchase_menu %}
                     {% comment %} <a href="{% url 'customer_vendor:purchase_order_list' %}" class="nav-link">
                         <i class="ri-store-2-line"></i> <!-- Updated Icon -->

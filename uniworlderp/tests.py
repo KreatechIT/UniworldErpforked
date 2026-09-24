@@ -832,3 +832,120 @@ class PaymentTests(CustomerEmployeeAssignmentBase):
         resp = self.client.get(reverse('customer_vendor:payment_view', args=[payment.pk]))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'PAYMENT RECEIPT')
+
+
+class LedgerTests(CustomerEmployeeAssignmentBase):
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.cash, _ = PaymentMethod.objects.get_or_create(name='Cash', defaults={'kind': 'cash'})
+
+    def make_confirmed_invoice(self, customer, employee, quantity=2, unit_price=Decimal('100.00'), order_date=None):
+        order = SalesOrder.objects.create(customer=customer, sales_employee=employee, owner=self.admin)
+        if order_date:
+            SalesOrder.objects.filter(pk=order.pk).update(order_date=order_date)
+            order.refresh_from_db()
+        SalesOrderItem.objects.create(sales_order=order, product=self.product, unit_price=unit_price, quantity=quantity)
+        confirm_sales_order(order)
+        order.refresh_from_db()
+        invoice = order.invoice
+        if order_date:
+            ARInvoice.objects.filter(pk=invoice.pk).update(invoice_date=order_date)
+            invoice.refresh_from_db()
+        return invoice
+
+    def test_ledger_requires_login(self):
+        resp = self.client.get(reverse('customer_vendor:ledger'))
+        self.assertEqual(resp.status_code, 302)
+
+    def test_ledger_without_customer_shows_picker(self):
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:ledger'))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'Select a customer')
+
+    def test_ledger_running_balance_matches_invoices_and_payments(self):
+        invoice = self.make_confirmed_invoice(self.c1a, self.emp1, quantity=2, unit_price=Decimal('100.00'), order_date=date(2026, 1, 5))
+        Payment.objects.create(
+            invoice=invoice, customer=invoice.customer, sales_employee=invoice.sales_employee,
+            amount=Decimal('50.00'), method=self.cash, created_by=self.admin, payment_date=date(2026, 1, 10),
+        )
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:ledger'), {
+            'customer': str(self.c1a.pk), 'preset': 'range',
+            'start_date': '2026-01-01', 'end_date': '2026-01-31',
+        })
+        self.assertEqual(resp.status_code, 200)
+        ledger = resp.context['ledger']
+        self.assertEqual(ledger['brought_forward'], Decimal('0.00'))
+        self.assertEqual(len(ledger['rows']), 2)
+        self.assertEqual(ledger['rows'][0]['type'], 'Invoice')
+        self.assertEqual(ledger['rows'][0]['balance'], Decimal('200.00'))
+        self.assertEqual(ledger['rows'][1]['balance'], Decimal('150.00'))
+        self.assertEqual(ledger['closing_balance'], Decimal('150.00'))
+
+    def test_ledger_brought_forward_rolls_up_earlier_transactions(self):
+        invoice = self.make_confirmed_invoice(self.c1a, self.emp1, quantity=1, unit_price=Decimal('100.00'), order_date=date(2026, 1, 5))
+        Payment.objects.create(
+            invoice=invoice, customer=invoice.customer, sales_employee=invoice.sales_employee,
+            amount=Decimal('40.00'), method=self.cash, created_by=self.admin, payment_date=date(2026, 1, 6),
+        )
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:ledger'), {
+            'customer': str(self.c1a.pk), 'preset': 'range',
+            'start_date': '2026-02-01', 'end_date': '2026-02-28',
+        })
+        ledger = resp.context['ledger']
+        self.assertEqual(ledger['brought_forward'], Decimal('60.00'))
+        self.assertEqual(len(ledger['rows']), 0)
+        self.assertEqual(ledger['closing_balance'], Decimal('60.00'))
+
+    def test_ledger_drill_down_link_from_customer_list(self):
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:customer_list'))
+        self.assertContains(resp, f"/erp/ledger/?customer={self.c1a.pk}")
+
+    def test_ledger_print_and_excel_for_customer(self):
+        invoice = self.make_confirmed_invoice(self.c1a, self.emp1)
+        self.client.force_login(self.admin)
+        print_resp = self.client.get(reverse('customer_vendor:ledger_print'), {'customer': str(self.c1a.pk)})
+        self.assertEqual(print_resp.status_code, 200)
+        excel_resp = self.client.get(reverse('customer_vendor:ledger_excel'), {'customer': str(self.c1a.pk)})
+        self.assertEqual(excel_resp.status_code, 200)
+        self.assertEqual(excel_resp['Content-Type'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')
+
+    def test_reports_page_includes_finance_tabs(self):
+        self.make_confirmed_invoice(self.c1a, self.emp1, order_date=date(2026, 1, 5))
+        self.client.force_login(self.admin)
+        resp = self.client.post(reverse('customer_vendor:sales_report'), {
+            'start_date': '2020-01-01', 'end_date': '2026-12-31',
+        })
+        self.assertEqual(resp.status_code, 200)
+        for marker in ('Collections', 'Finance Summary'):
+            self.assertContains(resp, marker)
+
+    def test_finance_summary_tab_shows_per_customer_outstanding(self):
+        invoice = self.make_confirmed_invoice(self.c1a, self.emp1, order_date=date(2026, 1, 5))
+        self.client.force_login(self.admin)
+        resp = self.client.post(reverse('customer_vendor:sales_report'), {
+            'start_date': '2020-01-01', 'end_date': '2026-12-31',
+        })
+        summary = {row['customer']: row for row in resp.context['finance_customer_summary']}
+        self.assertIn(self.c1a.name, summary)
+        row = summary[self.c1a.name]
+        self.assertEqual(row['invoiced'], invoice.total_amount)
+        self.assertEqual(row['outstanding'], invoice.balance_due)
+
+    def test_finance_report_print_and_excel(self):
+        self.make_confirmed_invoice(self.c1a, self.emp1, order_date=date(2026, 1, 5))
+        self.client.force_login(self.admin)
+        print_resp = self.client.post(reverse('customer_vendor:finance_report_print'), {
+            'start_date': '2020-01-01', 'end_date': '2026-12-31',
+        })
+        self.assertEqual(print_resp.status_code, 200)
+        excel_resp = self.client.post(reverse('customer_vendor:finance_report_excel'), {
+            'start_date': '2020-01-01', 'end_date': '2026-12-31',
+        })
+        self.assertEqual(excel_resp.status_code, 200)
+        self.assertEqual(excel_resp['Content-Type'], 'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet')

@@ -1,0 +1,233 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block main_content %}
+{% include "message.html" %}
+
+<div class="bg-[hsl(var(--background))] rounded-lg shadow-lg overflow-hidden border border-[hsl(var(--border))]">
+    <div class="p-6">
+        <form method="get" action="{% url 'customer_vendor:ledger' %}" id="ledgerForm">
+            <div class="flex flex-col lg:flex-row lg:flex-wrap justify-between items-start lg:items-center mb-4 gap-4">
+                <h2 class="text-2xl font-bold">Ledger</h2>
+
+                <div class="flex flex-col items-start lg:items-end">
+                    <nav class="relative flex space-x-1 rounded-xl bg-gradient-to-r from-[#480d0f] to-[#000000] p-1 shadow-lg w-full sm:w-auto sm:inline-flex">
+                        <button type="button" data-preset="day" class="ledger-preset-btn w-full sm:w-28 py-2 px-3 text-sm font-medium rounded-lg transition-all {% if preset == 'day' %}bg-white text-gray-900{% else %}text-white{% endif %}">Day</button>
+                        <button type="button" data-preset="month" class="ledger-preset-btn w-full sm:w-28 py-2 px-3 text-sm font-medium rounded-lg transition-all {% if preset == 'month' %}bg-white text-gray-900{% else %}text-white{% endif %}">Month</button>
+                        <button type="button" data-preset="year" class="ledger-preset-btn w-full sm:w-28 py-2 px-3 text-sm font-medium rounded-lg transition-all {% if preset == 'year' %}bg-white text-gray-900{% else %}text-white{% endif %}">Year</button>
+                        <button type="button" data-preset="range" class="ledger-preset-btn w-full sm:w-28 py-2 px-3 text-sm font-medium rounded-lg transition-all {% if preset == 'range' %}bg-white text-gray-900{% else %}text-white{% endif %}">Range</button>
+                    </nav>
+                    <input type="hidden" name="preset" id="ledgerPresetInput" value="{{ preset }}">
+                    {% if preset == 'day' %}
+                        <div class="mt-2 text-sm text-[hsl(var(--muted-foreground))]">Showing: <span class="font-semibold text-[hsl(var(--foreground))]">{{ start_date }}</span></div>
+                    {% elif preset == 'month' %}
+                        <div class="mt-2 text-sm text-[hsl(var(--muted-foreground))]">Showing: <span class="font-semibold text-[hsl(var(--foreground))]">{{ start_date }} to {{ end_date }}</span></div>
+                    {% elif preset == 'year' %}
+                        <div class="mt-2 text-sm text-[hsl(var(--muted-foreground))]">Showing: <span class="font-semibold text-[hsl(var(--foreground))]">{{ start_date }} to {{ end_date }}</span></div>
+                    {% endif %}
+                </div>
+            </div>
+
+            <div id="ledgerRangeInputs" class="flex flex-wrap items-center gap-2 mb-4 justify-end {% if preset != 'range' %}hidden{% endif %}">
+                <div>
+                    <label class="block text-xs text-[hsl(var(--muted-foreground))]">Start date</label>
+                    <input type="date" name="start_date" value="{{ start_date }}" class="form-input py-2 border border-[hsl(var(--border))] rounded-md text-sm bg-[hsl(var(--background))]">
+                </div>
+                <div>
+                    <label class="block text-xs text-[hsl(var(--muted-foreground))]">End date</label>
+                    <input type="date" name="end_date" value="{{ end_date }}" class="form-input py-2 border border-[hsl(var(--border))] rounded-md text-sm bg-[hsl(var(--background))]">
+                </div>
+            </div>
+
+            <div class="flex flex-wrap items-center gap-2 mb-6">
+                <div>
+                    <label class="block text-xs text-[hsl(var(--muted-foreground))]">Customer</label>
+                    <select name="customer" onchange="this.form.submit()" class="form-input py-3 w-full sm:w-64 bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm">
+                        <option value="">Select a customer...</option>
+                        {% for customer in customers %}
+                            <option value="{{ customer.id }}" {% if customer_id == customer.id|stringformat:"s" %}selected{% endif %}>{{ customer.name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs text-[hsl(var(--muted-foreground))]">Sales Employee</label>
+                    <select name="sales_employee" onchange="this.form.submit()" class="form-input py-3 w-full sm:w-56 bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm">
+                        <option value="">All Sales Employees</option>
+                        {% for employee in sales_employees %}
+                            <option value="{{ employee.id }}" {% if sales_employee_id == employee.id|stringformat:"s" %}selected{% endif %}>{{ employee.full_name }}</option>
+                        {% endfor %}
+                    </select>
+                </div>
+                <button type="submit" class="px-4 py-3 bg-gray-700 text-white rounded-md hover:bg-gray-600 text-sm self-end">Apply</button>
+                {% if customer_id or sales_employee_id %}
+                    <a href="{% url 'customer_vendor:ledger' %}" class="px-4 py-3 bg-gray-500 text-white rounded-md hover:bg-gray-400 text-sm self-end whitespace-nowrap">Clear</a>
+                {% endif %}
+            </div>
+        </form>
+
+        <div class="flex flex-wrap gap-4 mb-6">
+            <div class="p-4 rounded-lg bg-[hsl(var(--muted))]">
+                <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">Invoiced</div>
+                <div class="text-xl font-semibold">{{ invoiced_total|floatformat:2 }}</div>
+            </div>
+            <div class="p-4 rounded-lg bg-[hsl(var(--muted))]">
+                <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">Collected</div>
+                <div class="text-xl font-semibold text-green-600">{{ collected_total|floatformat:2 }}</div>
+            </div>
+            <div class="p-4 rounded-lg bg-[hsl(var(--muted))]">
+                <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">Outstanding</div>
+                <div class="text-xl font-semibold text-red-600">{{ outstanding_total|floatformat:2 }}</div>
+            </div>
+            <div class="p-4 rounded-lg bg-[hsl(var(--muted))]">
+                <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">Overdue Invoices</div>
+                <div class="text-xl font-semibold text-amber-600">{{ overdue_count }}</div>
+            </div>
+        </div>
+
+        {% if not customer_id %}
+            <div class="p-8 text-center text-[hsl(var(--muted-foreground))] border border-dashed border-[hsl(var(--border))] rounded-lg">
+                <i class="ri-user-search-line text-3xl mb-2 block"></i>
+                Select a customer above to see their statement (opening balance, invoices, payments, running balance).
+            </div>
+        {% else %}
+            <div class="mb-4 flex flex-wrap justify-between items-center gap-2">
+                <h3 class="text-lg font-semibold">Statement — {{ selected_customer.name }}</h3>
+                <div class="flex gap-2">
+                    <a href="{% url 'customer_vendor:ledger_print' %}?customer={{ selected_customer.id }}&start_date={{ start_date }}&end_date={{ end_date }}" target="_blank" class="btn-secondary">Print Statement</a>
+                    <a href="{% url 'customer_vendor:ledger_excel' %}?customer={{ selected_customer.id }}&start_date={{ start_date }}&end_date={{ end_date }}" class="btn-secondary">Export to Excel</a>
+                    <button type="button" class="export-button btn-secondary" data-table-id="ledgerTable">Export as CSV</button>
+                </div>
+            </div>
+
+            <div class="overflow-x-auto table-container">
+                <div class="bg-gradient-to-br from-[#a31319] to-black rounded-lg shadow-lg overflow-hidden">
+                    <div class="p-6">
+                        <div class="overflow-x-auto">
+                            <table id="ledgerTable" class="w-full text-sm text-left text-gray-200">
+                                <thead class="text-xs uppercase bg-[#480d0f] text-gray-100">
+                                    <tr>
+                                        <th scope="col" class="px-6 py-3">Date</th>
+                                        <th scope="col" class="px-6 py-3">Type</th>
+                                        <th scope="col" class="px-6 py-3">Ref</th>
+                                        <th scope="col" class="px-6 py-3">Debit (owed)</th>
+                                        <th scope="col" class="px-6 py-3">Credit (paid)</th>
+                                        <th scope="col" class="px-6 py-3">Balance</th>
+                                        <th scope="col" class="px-6 py-3">Notes</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <tr class="border-b border-gray-700 bg-[#3a0d0f] font-semibold">
+                                        <td class="px-6 py-4 whitespace-nowrap">{{ start_date|default:"—" }}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap">Opening balance</td>
+                                        <td class="px-6 py-4 whitespace-nowrap">—</td>
+                                        <td class="px-6 py-4 whitespace-nowrap">—</td>
+                                        <td class="px-6 py-4 whitespace-nowrap">—</td>
+                                        <td class="px-6 py-4 whitespace-nowrap">{{ ledger.brought_forward|floatformat:2 }}</td>
+                                        <td class="px-6 py-4">brought forward</td>
+                                    </tr>
+                                    {% for row in ledger.rows %}
+                                    <tr class="border-b border-gray-700 hover:bg-[#5a1114] transition-colors">
+                                        <td class="px-6 py-4 whitespace-nowrap">{{ row.date|date:"Y-m-d" }}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap">{{ row.type }}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <a href="{% url row.link_url_name row.link_pk %}" class="underline hover:text-white">{{ row.ref }}</a>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap {% if row.debit %}text-red-300{% endif %}">{% if row.debit %}{{ row.debit|floatformat:2 }}{% else %}—{% endif %}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap {% if row.credit %}text-green-300{% endif %}">{% if row.credit %}{{ row.credit|floatformat:2 }}{% else %}—{% endif %}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap font-semibold">{{ row.balance|floatformat:2 }}</td>
+                                        <td class="px-6 py-4">{{ row.notes|default:"-" }}</td>
+                                    </tr>
+                                    {% empty %}
+                                    <tr>
+                                        <td colspan="7" class="px-6 py-4 text-center text-sm text-gray-400">No transactions in this date range.</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                                <tfoot>
+                                    <tr class="bg-[#480d0f] font-bold">
+                                        <td colspan="3" class="px-6 py-4 text-right">Totals:</td>
+                                        <td class="px-6 py-4">{{ ledger.total_debit|floatformat:2 }}</td>
+                                        <td class="px-6 py-4">{{ ledger.total_credit|floatformat:2 }}</td>
+                                        <td class="px-6 py-4">{{ ledger.closing_balance|floatformat:2 }}</td>
+                                        <td></td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        {% endif %}
+    </div>
+</div>
+
+<script>
+document.addEventListener('DOMContentLoaded', function() {
+    const presetButtons = document.querySelectorAll('.ledger-preset-btn');
+    const presetInput = document.getElementById('ledgerPresetInput');
+    const rangeInputs = document.getElementById('ledgerRangeInputs');
+    const form = document.getElementById('ledgerForm');
+
+    presetButtons.forEach(btn => {
+        btn.addEventListener('click', function() {
+            const preset = this.getAttribute('data-preset');
+            presetInput.value = preset;
+            presetButtons.forEach(b => {
+                b.classList.remove('bg-white', 'text-gray-900');
+                b.classList.add('text-white');
+            });
+            this.classList.add('bg-white', 'text-gray-900');
+            this.classList.remove('text-white');
+
+            if (preset === 'range') {
+                rangeInputs.classList.remove('hidden');
+            } else {
+                rangeInputs.classList.add('hidden');
+                form.submit();
+            }
+        });
+    });
+
+    document.querySelectorAll('.export-button').forEach(button => {
+        button.addEventListener('click', function() {
+            const tableId = this.getAttribute('data-table-id');
+            const table = document.getElementById(tableId);
+            let csvContent = '';
+
+            const escapeCSV = (value) => {
+                if (value === null || value === undefined) return '';
+                const stringValue = String(value).trim();
+                if (stringValue.includes(',') || stringValue.includes('"') || stringValue.includes('\n')) {
+                    return '"' + stringValue.replace(/"/g, '""') + '"';
+                }
+                return stringValue;
+            };
+
+            const headerRow = table.querySelector('thead tr');
+            if (headerRow) {
+                const headers = headerRow.querySelectorAll('th');
+                csvContent += Array.from(headers).map(th => escapeCSV(th.textContent)).join(',') + '\n';
+            }
+
+            const bodyRows = table.querySelectorAll('tbody tr');
+            bodyRows.forEach(row => {
+                const cols = row.querySelectorAll('td');
+                if (cols.length > 1) {
+                    csvContent += Array.from(cols).map(col => escapeCSV(col.textContent)).join(',') + '\n';
+                }
+            });
+
+            const blob = new Blob([csvContent], { type: 'text/csv;charset=utf-8;' });
+            const link = document.createElement('a');
+            const url = URL.createObjectURL(blob);
+            link.setAttribute('href', url);
+            link.setAttribute('download', `${tableId}.csv`);
+            link.style.visibility = 'hidden';
+            document.body.appendChild(link);
+            link.click();
+            document.body.removeChild(link);
+        });
+    });
+});
+</script>
+{% endblock %}

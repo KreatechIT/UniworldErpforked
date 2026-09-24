@@ -1,7 +1,7 @@
 from django.shortcuts import render
 from django.views import View
 from django.contrib.auth.mixins import LoginRequiredMixin, PermissionRequiredMixin
-from uniworlderp.models import SalesOrder, CustomerVendor, Product, SalesEmployee, SalesOrderItem, StockTransaction, ReturnSalesItem
+from uniworlderp.models import SalesOrder, CustomerVendor, Product, SalesEmployee, SalesOrderItem, StockTransaction, ReturnSalesItem, ARInvoice, Payment
 from django.db.models import Sum, F, ExpressionWrapper, DecimalField, Q, Value, IntegerField
 from django.db.models.functions import Coalesce
 from datetime import datetime, timedelta, time
@@ -48,6 +48,72 @@ def attach_order_discount_shares(items_with_data):
         item.order_discount_share = share
         item.total_discount = (item.total_discount or Decimal('0.00')) + share
         item.net_amount -= share
+
+
+def build_finance_reports(customer_id, sales_employee_id, start_date, end_date):
+    invoices = ARInvoice.objects.select_related('customer', 'sales_employee', 'sales_order').prefetch_related('payments')
+    payments = Payment.objects.select_related('customer', 'sales_employee', 'method', 'invoice')
+
+    if customer_id:
+        invoices = invoices.filter(customer_id=customer_id)
+        payments = payments.filter(customer_id=customer_id)
+    if sales_employee_id:
+        invoices = invoices.filter(sales_employee_id=sales_employee_id)
+        payments = payments.filter(sales_employee_id=sales_employee_id)
+    if start_date and end_date:
+        invoices = invoices.filter(invoice_date__range=[start_date, end_date])
+        payments = payments.filter(payment_date__range=[start_date, end_date])
+
+    invoices = list(invoices.order_by('-invoice_date'))
+    payments = list(payments.order_by('-payment_date'))
+
+    collections_total = sum((p.amount for p in payments), Decimal('0.00'))
+    collections_by_method = {}
+    collections_by_employee = {}
+    for p in payments:
+        method_name = p.method.name if p.method_id else 'Unknown'
+        collections_by_method.setdefault(method_name, Decimal('0.00'))
+        collections_by_method[method_name] += p.amount
+
+        employee_name = p.sales_employee.full_name if p.sales_employee_id else 'Unassigned'
+        collections_by_employee.setdefault(employee_name, Decimal('0.00'))
+        collections_by_employee[employee_name] += p.amount
+
+    collections_by_method_list = [{'label': k, 'amount': v} for k, v in sorted(collections_by_method.items())]
+    collections_by_employee_list = [{'label': k, 'amount': v} for k, v in sorted(collections_by_employee.items())]
+
+    customer_summary_map = {}
+    for inv in invoices:
+        key = inv.customer.name
+        customer_summary_map.setdefault(key, {'invoiced': Decimal('0.00'), 'paid': Decimal('0.00')})
+        customer_summary_map[key]['invoiced'] += inv.total_amount
+        customer_summary_map[key]['paid'] += inv.paid_amount
+
+    finance_customer_summary = [
+        {'customer': k, 'invoiced': v['invoiced'], 'paid': v['paid'], 'outstanding': v['invoiced'] - v['paid']}
+        for k, v in sorted(customer_summary_map.items())
+    ]
+
+    employee_summary_map = {}
+    for inv in invoices:
+        key = inv.sales_employee.full_name if inv.sales_employee_id else 'Unassigned'
+        employee_summary_map.setdefault(key, {'invoiced': Decimal('0.00'), 'paid': Decimal('0.00')})
+        employee_summary_map[key]['invoiced'] += inv.total_amount
+        employee_summary_map[key]['paid'] += inv.paid_amount
+
+    finance_employee_summary = [
+        {'employee': k, 'invoiced': v['invoiced'], 'paid': v['paid'], 'outstanding': v['invoiced'] - v['paid']}
+        for k, v in sorted(employee_summary_map.items())
+    ]
+
+    return {
+        'collections_rows': payments,
+        'collections_total': collections_total,
+        'collections_by_method': collections_by_method_list,
+        'collections_by_employee': collections_by_employee_list,
+        'finance_customer_summary': finance_customer_summary,
+        'finance_employee_summary': finance_employee_summary,
+    }
 
 
 class ReportView(LoginRequiredMixin, View):
@@ -305,6 +371,8 @@ class ReportView(LoginRequiredMixin, View):
             for k, v in sorted(date_totals.items())
         ]
 
+        finance_reports = build_finance_reports(customer_id, sales_employee_id, start_date, end_date)
+
         return render(request, self.template_name, {
             'report_items': items_with_data,
             'customers': CustomerVendor.objects.filter(entity_type='customer').order_by('name'),
@@ -322,6 +390,7 @@ class ReportView(LoginRequiredMixin, View):
             'gross_amount': gross_amount,
             'returned_amount': returned_amount,
             'net_amount': net_amount,
+            **finance_reports,
         })
 
     def get_product_transactions(self, product, start_date=None, end_date=None):
@@ -1155,5 +1224,137 @@ class MinimumStockReportView(LoginRequiredMixin, PermissionRequiredMixin, View):
             'report_start_time': 'Current Stock',
             'report_end_time': 'Current Stock',
         }
-        
+
         return render(request, self.template_name, context)
+
+
+class FinanceReportPrintView(LoginRequiredMixin, View):
+    """Printable view for the Finance tabs: Outstanding/Due, Collections, Receivables Aging, Finance Summary."""
+    template_name = 'reports/finance_report_print.html'
+
+    def post(self, request, *args, **kwargs):
+        customer_id = request.POST.get('customer')
+        sales_employee_id = request.POST.get('sales_employee')
+
+        today = timezone.now().date()
+        first_day_of_month = today.replace(day=1)
+        start_date = request.POST.get('start_date', first_day_of_month)
+        end_date = request.POST.get('end_date', today)
+
+        finance_reports = build_finance_reports(customer_id, sales_employee_id, start_date, end_date)
+
+        customer_name = None
+        employee_name = None
+        if customer_id:
+            try:
+                customer_name = CustomerVendor.objects.get(id=customer_id).name
+            except CustomerVendor.DoesNotExist:
+                pass
+        if sales_employee_id:
+            try:
+                employee_name = SalesEmployee.objects.get(id=sales_employee_id).full_name
+            except SalesEmployee.DoesNotExist:
+                pass
+
+        now = timezone.now()
+        bdt = pytz.timezone('Asia/Dhaka')
+        now_bdt = now.astimezone(bdt)
+
+        context = {
+            **finance_reports,
+            'customer_name': customer_name,
+            'employee_name': employee_name,
+            'start_date': start_date,
+            'end_date': end_date,
+            'user': request.user,
+            'report_generated_at': now_bdt.strftime('%d/%m/%Y %I:%M %p'),
+            'print_view': True,
+        }
+        return render(request, self.template_name, context)
+
+
+class FinanceReportExcelView(LoginRequiredMixin, View):
+    """Excel export for the Finance tabs, same filters/queries as the screen and print views."""
+
+    def post(self, request, *args, **kwargs):
+        customer_id = request.POST.get('customer')
+        sales_employee_id = request.POST.get('sales_employee')
+
+        today = timezone.now().date()
+        first_day_of_month = today.replace(day=1)
+        start_date = request.POST.get('start_date', first_day_of_month)
+        end_date = request.POST.get('end_date', today)
+
+        finance_reports = build_finance_reports(customer_id, sales_employee_id, start_date, end_date)
+
+        wb = Workbook()
+
+        ws2 = wb.active
+        ws2.title = "Collections"
+        headers = ['Date', 'Payment #', 'Customer', 'Invoice #', 'Method', 'Amount', 'Received By']
+        for col, header in enumerate(headers, 1):
+            cell = ws2.cell(row=1, column=col, value=header)
+            cell.font = Font(bold=True)
+        row_num = 2
+        for p in finance_reports['collections_rows']:
+            ws2.cell(row=row_num, column=1, value=p.payment_date.strftime('%d/%m/%Y') if p.payment_date else '')
+            ws2.cell(row=row_num, column=2, value=p.id)
+            ws2.cell(row=row_num, column=3, value=p.customer.name)
+            ws2.cell(row=row_num, column=4, value=p.invoice_id)
+            ws2.cell(row=row_num, column=5, value=p.method.name if p.method_id else '')
+            ws2.cell(row=row_num, column=6, value=float(p.amount))
+            ws2.cell(row=row_num, column=7, value=p.received_by or '')
+            row_num += 1
+        ws2.cell(row=row_num + 1, column=1, value='TOTAL COLLECTED:').font = Font(bold=True)
+        ws2.cell(row=row_num + 1, column=6, value=float(finance_reports['collections_total'])).font = Font(bold=True)
+
+        ws4 = wb.create_sheet("Finance Summary")
+        ws4.cell(row=1, column=1, value='By Customer').font = Font(bold=True, size=12)
+        headers = ['Customer', 'Invoiced', 'Paid', 'Outstanding']
+        for col, header in enumerate(headers, 1):
+            ws4.cell(row=2, column=col, value=header).font = Font(bold=True)
+        row_num = 3
+        for row in finance_reports['finance_customer_summary']:
+            ws4.cell(row=row_num, column=1, value=row['customer'])
+            ws4.cell(row=row_num, column=2, value=float(row['invoiced']))
+            ws4.cell(row=row_num, column=3, value=float(row['paid']))
+            ws4.cell(row=row_num, column=4, value=float(row['outstanding']))
+            row_num += 1
+
+        row_num += 2
+        ws4.cell(row=row_num, column=1, value='By Sales Employee').font = Font(bold=True, size=12)
+        row_num += 1
+        headers = ['Sales Employee', 'Invoiced', 'Paid', 'Outstanding']
+        for col, header in enumerate(headers, 1):
+            ws4.cell(row=row_num, column=col, value=header).font = Font(bold=True)
+        row_num += 1
+        for row in finance_reports['finance_employee_summary']:
+            ws4.cell(row=row_num, column=1, value=row['employee'])
+            ws4.cell(row=row_num, column=2, value=float(row['invoiced']))
+            ws4.cell(row=row_num, column=3, value=float(row['paid']))
+            ws4.cell(row=row_num, column=4, value=float(row['outstanding']))
+            row_num += 1
+
+        for ws in (ws2, ws4):
+            for column in ws.columns:
+                max_length = 0
+                column_letter = column[0].column_letter if hasattr(column[0], 'column_letter') else None
+                if column_letter:
+                    for cell in column:
+                        try:
+                            if hasattr(cell, 'value') and len(str(cell.value)) > max_length:
+                                max_length = len(str(cell.value))
+                        except Exception:
+                            pass
+                    ws.column_dimensions[column_letter].width = min(max_length + 2, 50)
+
+        buffer = io.BytesIO()
+        wb.save(buffer)
+        buffer.seek(0)
+
+        response = HttpResponse(
+            buffer.getvalue(),
+            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+        )
+        response['Content-Disposition'] = f'attachment; filename=finance_report_{start_date}_to_{end_date}.xlsx'
+        return response

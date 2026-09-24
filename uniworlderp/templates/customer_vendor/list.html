@@ -137,6 +137,9 @@
                                             <a href="{% url 'customer_vendor:invoice_list' customer.pk %}" class="px-2 py-1 text-xs font-semibold rounded-full bg-teal-800 text-teal-100 hover:bg-teal-700">
                                                 <i class="ri-file-list-3-line mr-1"></i>Invoices
                                             </a>
+                                            <a href="{% url 'customer_vendor:ledger' %}?customer={{ customer.pk }}" class="px-2 py-1 text-xs font-semibold rounded-full bg-orange-800 text-orange-100 hover:bg-orange-700">
+                                                <i class="ri-book-2-line mr-1"></i>Ledger
+                                            </a>
                                         </div>
                                     </td>
                                 </tr>

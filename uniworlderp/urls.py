@@ -1,5 +1,5 @@
 from django.urls import path
-from uniworlderp.views import customer_views, sales_employee_views,product_views,sales_order_views,invoice_views,purchase_views,materials_purchase_views,report_views,payment_views
+from uniworlderp.views import customer_views, sales_employee_views,product_views,sales_order_views,invoice_views,purchase_views,materials_purchase_views,report_views,payment_views,ledger_views
 from . import views
 
 app_name = 'customer_vendor'
@@ -100,5 +100,12 @@ urlpatterns = [
     path('reports/customers/', report_views.CustomerReportView.as_view(), name='customer_report'),
     path('reports/customers/print/', report_views.CustomerReportPrintView.as_view(), name='customer_report_print'),
     path('reports/customers/excel/', report_views.CustomerReportExcelView.as_view(), name='customer_report_excel'),
-    
+
+    path('reports/finance/print/', report_views.FinanceReportPrintView.as_view(), name='finance_report_print'),
+    path('reports/finance/excel/', report_views.FinanceReportExcelView.as_view(), name='finance_report_excel'),
+
+    path('ledger/', ledger_views.LedgerView.as_view(), name='ledger'),
+    path('ledger/print/', ledger_views.LedgerPrintView.as_view(), name='ledger_print'),
+    path('ledger/excel/', ledger_views.LedgerExcelView.as_view(), name='ledger_excel'),
+
 ]
