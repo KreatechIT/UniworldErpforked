@@ -1,6 +1,6 @@
 from .common_imports import *
 from uniworlderp.models import ARInvoice, ARInvoiceItem, CustomerVendor, Product, StockTransaction, SalesEmployee, SalesOrder
-from uniworlderp.forms import ARInvoiceForm, ARInvoiceItemFormSet,ARInvoiceItemForm,get_ar_invoice_item_formset, ARInvoiceNotesForm
+from uniworlderp.forms import ARInvoiceForm, ARInvoiceItemFormSet,ARInvoiceItemForm,get_ar_invoice_item_formset, ARInvoiceNotesForm, PaymentForm
 from company.models import Company, Branch, ContactPerson
 
 class ARInvoiceListView(ListView):
@@ -17,7 +17,7 @@ class ARInvoiceListView(ListView):
         start_date = self.request.GET.get('start_date', '')
         end_date = self.request.GET.get('end_date', '')
 
-        queryset = ARInvoice.objects.all().order_by('-invoice_date')
+        queryset = ARInvoice.objects.select_related('customer', 'sales_order').prefetch_related('payments').order_by('-invoice_date')
 
         if search_query:
             queryset = queryset.filter(
@@ -307,6 +307,10 @@ class ARInvoiceDetailView(PermissionRequiredMixin, DetailView):
             field.widget.attrs['disabled'] = 'disabled'
         context['is_locked'] = bool(self.object.sales_order_id)
         context['notes_form'] = ARInvoiceNotesForm(instance=self.object)
+        context['payments'] = self.object.payments.select_related('method').order_by('-payment_date', '-id')
+        context['paid_amount'] = self.object.paid_amount
+        context['balance_due'] = self.object.balance_due
+        context['payment_form'] = PaymentForm()
         return context
 
     def get_common_context(self):

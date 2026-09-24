@@ -2,7 +2,7 @@ from django.contrib import admin
 from .models import (
     CustomerVendor, CustomerVendorAttachment, SalesEmployee, Product,
     SalesOrder, SalesOrderItem, PurchaseOrder, PurchaseOrderItem,
-    ARInvoice, ARInvoiceItem
+    ARInvoice, ARInvoiceItem, PaymentMethod, Payment
 )
 
 class CustomerVendorAttachmentInline(admin.TabularInline):
@@ -50,6 +50,18 @@ class ARInvoiceAdmin(admin.ModelAdmin):
     list_filter = ('payment_status', 'invoice_date', 'due_date')
     search_fields = ('customer__name', 'sales_employee__user__username')
     inlines = [ARInvoiceItemInline]
+
+@admin.register(PaymentMethod)
+class PaymentMethodAdmin(admin.ModelAdmin):
+    list_display = ('name', 'kind', 'is_active', 'details')
+    list_filter = ('kind', 'is_active')
+    search_fields = ('name', 'details')
+
+@admin.register(Payment)
+class PaymentAdmin(admin.ModelAdmin):
+    list_display = ('id', 'invoice', 'customer', 'payment_date', 'amount', 'method', 'received_by')
+    list_filter = ('method', 'payment_date')
+    search_fields = ('invoice__id', 'customer__name', 'received_by', 'transaction_reference', 'cheque_number', 'transaction_id')
 
 admin.site.register(CustomerVendorAttachment)
 admin.site.register(SalesOrderItem)

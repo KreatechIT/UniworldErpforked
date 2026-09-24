@@ -9,7 +9,9 @@ from django.test import TestCase
 from django.urls import reverse
 
 from uniworlderp.forms import CustomerVendorForm, SalesOrderForm
-from uniworlderp.models import ARInvoice, CustomerVendor, Product, SalesEmployee, SalesOrder, SalesOrderItem
+from uniworlderp.models import (
+    ARInvoice, CustomerVendor, Payment, PaymentMethod, Product, SalesEmployee, SalesOrder, SalesOrderItem,
+)
 from uniworlderp.views.sales_order_views import confirm_sales_order
 
 
@@ -565,7 +567,7 @@ class AutoInvoiceOnConfirmTests(CustomerEmployeeAssignmentBase):
         order.invoice.payment_status = 'C'
         order.invoice.save(update_fields=['payment_status'])
         resp = self.client.get(reverse('customer_vendor:invoice_list'))
-        self.assertRegex(resp.content.decode(), r'bg-green-800 text-green-100\s*">\s*Completed')
+        self.assertRegex(resp.content.decode(), r'bg-green-800 text-green-100\s*">\s*Paid')
 
     def test_invoice_list_filters_by_customer_employee_status_and_date(self):
         order1 = self.make_draft_order()
@@ -598,3 +600,235 @@ class AutoInvoiceOnConfirmTests(CustomerEmployeeAssignmentBase):
         self.assertContains(resp, 'All Payment Statuses')
         self.assertContains(resp, 'All Customers')
         self.assertContains(resp, 'All Sales Employees')
+
+
+class PaymentTests(CustomerEmployeeAssignmentBase):
+
+    @classmethod
+    def setUpTestData(cls):
+        super().setUpTestData()
+        cls.admin.user_permissions.add(*Permission.objects.filter(codename__in=[
+            'add_payment', 'change_payment', 'delete_payment', 'view_payment',
+        ]))
+        cls.cash, _ = PaymentMethod.objects.get_or_create(name='Cash', defaults={'kind': 'cash'})
+        cls.bank = PaymentMethod.objects.create(name='City Bank A/C 1234', kind='bank')
+
+    def make_confirmed_invoice(self, quantity=2, unit_price=Decimal('100.00')):
+        order = SalesOrder.objects.create(customer=self.c1a, sales_employee=self.emp1, owner=self.admin)
+        SalesOrderItem.objects.create(sales_order=order, product=self.product, unit_price=unit_price, quantity=quantity)
+        confirm_sales_order(order)
+        order.refresh_from_db()
+        return order.invoice
+
+    def test_full_payment_marks_invoice_paid(self):
+        invoice = self.make_confirmed_invoice()
+        self.client.force_login(self.admin)
+        resp = self.client.post(reverse('customer_vendor:payment_create', args=[invoice.pk]), {
+            'payment_date': '2026-09-24', 'amount': '200.00', 'method': self.cash.pk,
+            'received_by': 'Atiq',
+        })
+        self.assertRedirects(resp, reverse('customer_vendor:invoice_view', args=[invoice.pk]))
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.payment_status, 'C')
+        self.assertEqual(invoice.paid_amount, Decimal('200.00'))
+        self.assertEqual(invoice.balance_due, Decimal('0.00'))
+
+    def test_partial_payment_marks_invoice_partial(self):
+        invoice = self.make_confirmed_invoice()
+        self.client.force_login(self.admin)
+        self.client.post(reverse('customer_vendor:payment_create', args=[invoice.pk]), {
+            'payment_date': '2026-09-24', 'amount': '50.00', 'method': self.cash.pk,
+        })
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.payment_status, 'PA')
+        self.assertEqual(invoice.balance_due, Decimal('150.00'))
+
+    def test_multiple_partial_payments_accumulate_to_paid(self):
+        invoice = self.make_confirmed_invoice()
+        self.client.force_login(self.admin)
+        self.client.post(reverse('customer_vendor:payment_create', args=[invoice.pk]), {
+            'payment_date': '2026-09-24', 'amount': '120.00', 'method': self.cash.pk,
+        })
+        self.client.post(reverse('customer_vendor:payment_create', args=[invoice.pk]), {
+            'payment_date': '2026-09-25', 'amount': '80.00', 'method': self.bank.pk,
+            'bank_name': 'City Bank', 'account_number': '1234',
+        })
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.payment_status, 'C')
+        self.assertEqual(Payment.objects.filter(invoice=invoice).count(), 2)
+
+    def test_overpayment_is_rejected(self):
+        invoice = self.make_confirmed_invoice()
+        self.client.force_login(self.admin)
+        resp = self.client.post(reverse('customer_vendor:payment_create', args=[invoice.pk]), {
+            'payment_date': '2026-09-24', 'amount': '999.00', 'method': self.cash.pk,
+        })
+        self.assertRedirects(resp, reverse('customer_vendor:invoice_view', args=[invoice.pk]))
+        invoice.refresh_from_db()
+        self.assertEqual(Payment.objects.filter(invoice=invoice).count(), 0)
+        self.assertEqual(invoice.payment_status, 'P')
+
+    def test_zero_or_negative_amount_rejected(self):
+        invoice = self.make_confirmed_invoice()
+        self.client.force_login(self.admin)
+        resp = self.client.post(reverse('customer_vendor:payment_create', args=[invoice.pk]), {
+            'payment_date': '2026-09-24', 'amount': '0', 'method': self.cash.pk,
+        })
+        self.assertEqual(Payment.objects.filter(invoice=invoice).count(), 0)
+
+    def test_second_payment_capped_at_remaining_balance(self):
+        invoice = self.make_confirmed_invoice()
+        self.client.force_login(self.admin)
+        self.client.post(reverse('customer_vendor:payment_create', args=[invoice.pk]), {
+            'payment_date': '2026-09-24', 'amount': '150.00', 'method': self.cash.pk,
+        })
+        resp = self.client.post(reverse('customer_vendor:payment_create', args=[invoice.pk]), {
+            'payment_date': '2026-09-24', 'amount': '100.00', 'method': self.cash.pk,
+        })
+        self.assertRedirects(resp, reverse('customer_vendor:invoice_view', args=[invoice.pk]))
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.paid_amount, Decimal('150.00'))
+
+    def test_deleting_payment_recomputes_status_back_to_pending(self):
+        invoice = self.make_confirmed_invoice()
+        payment = Payment.objects.create(
+            invoice=invoice, customer=invoice.customer, sales_employee=invoice.sales_employee,
+            amount=Decimal('200.00'), method=self.cash, created_by=self.admin,
+        )
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.payment_status, 'C')
+
+        self.client.force_login(self.admin)
+        resp = self.client.post(reverse('customer_vendor:payment_delete', args=[payment.pk]))
+        self.assertRedirects(resp, reverse('customer_vendor:invoice_view', args=[invoice.pk]))
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.payment_status, 'P')
+        self.assertEqual(invoice.paid_amount, Decimal('0.00'))
+
+    def test_payment_requires_permission(self):
+        invoice = self.make_confirmed_invoice()
+        no_perm_user = User.objects.create_user('nopay', password='pass')
+        self.client.force_login(no_perm_user)
+        resp = self.client.post(reverse('customer_vendor:payment_create', args=[invoice.pk]), {
+            'payment_date': '2026-09-24', 'amount': '50.00', 'method': self.cash.pk,
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(Payment.objects.filter(invoice=invoice).count(), 0)
+
+    def test_invoice_page_shows_add_payment_and_balance(self):
+        invoice = self.make_confirmed_invoice()
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:invoice_view', args=[invoice.pk]))
+        self.assertContains(resp, 'Add Payment')
+        self.assertContains(resp, 'Balance Due')
+
+    def test_add_payment_form_defaults_method_to_cash(self):
+        invoice = self.make_confirmed_invoice()
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:invoice_view', args=[invoice.pk]))
+        self.assertRegex(resp.content.decode(), r'<option value="' + str(self.cash.pk) + r'" selected>Cash</option>')
+
+    def test_add_payment_form_received_by_lists_sales_employees(self):
+        invoice = self.make_confirmed_invoice()
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:invoice_view', args=[invoice.pk]))
+        content = resp.content.decode()
+        self.assertIn('Atiq', content)
+        self.assertIn('Jabed', content)
+        self.assertIn('Other / Admin', content)
+
+    def test_invoice_page_links_back_to_sales_order(self):
+        invoice = self.make_confirmed_invoice()
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:invoice_view', args=[invoice.pk]))
+        self.assertContains(resp, reverse('customer_vendor:sales_order_view', args=[invoice.sales_order_id]))
+
+    def test_sales_order_page_links_to_invoice(self):
+        invoice = self.make_confirmed_invoice()
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:sales_order_view', args=[invoice.sales_order_id]))
+        self.assertContains(resp, reverse('customer_vendor:invoice_view', args=[invoice.pk]))
+
+    def test_payment_list_shows_recorded_payments_and_links(self):
+        invoice = self.make_confirmed_invoice()
+        Payment.objects.create(
+            invoice=invoice, customer=invoice.customer, sales_employee=invoice.sales_employee,
+            amount=Decimal('75.00'), method=self.cash, created_by=self.admin,
+        )
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:payment_list'))
+        self.assertContains(resp, '75.00')
+        self.assertContains(resp, reverse('customer_vendor:invoice_view', args=[invoice.pk]))
+
+    def test_payment_list_filters_by_customer_and_method(self):
+        invoice1 = self.make_confirmed_invoice()
+        order2 = SalesOrder.objects.create(customer=self.c2, sales_employee=self.emp2, owner=self.admin)
+        SalesOrderItem.objects.create(sales_order=order2, product=self.product, unit_price=Decimal('50.00'), quantity=1)
+        confirm_sales_order(order2)
+        order2.refresh_from_db()
+        invoice2 = order2.invoice
+
+        p1 = Payment.objects.create(
+            invoice=invoice1, customer=invoice1.customer, sales_employee=invoice1.sales_employee,
+            amount=Decimal('50.00'), method=self.cash, created_by=self.admin,
+        )
+        p2 = Payment.objects.create(
+            invoice=invoice2, customer=invoice2.customer, sales_employee=invoice2.sales_employee,
+            amount=Decimal('30.00'), method=self.bank, created_by=self.admin,
+        )
+
+        self.client.force_login(self.admin)
+        url = reverse('customer_vendor:payment_list')
+
+        resp = self.client.get(url, {'customer': self.c1a.pk})
+        self.assertEqual(set(resp.context['payments']), {p1})
+
+        resp = self.client.get(url, {'method': self.bank.pk})
+        self.assertEqual(set(resp.context['payments']), {p2})
+
+    def test_payment_list_shows_daily_collection_totals(self):
+        invoice1 = self.make_confirmed_invoice()
+        order2 = SalesOrder.objects.create(customer=self.c2, sales_employee=self.emp2, owner=self.admin)
+        SalesOrderItem.objects.create(sales_order=order2, product=self.product, unit_price=Decimal('50.00'), quantity=1)
+        confirm_sales_order(order2)
+        order2.refresh_from_db()
+        invoice2 = order2.invoice
+
+        Payment.objects.create(
+            invoice=invoice1, customer=invoice1.customer, sales_employee=invoice1.sales_employee,
+            amount=Decimal('50.00'), method=self.cash, created_by=self.admin, payment_date='2026-09-20',
+        )
+        Payment.objects.create(
+            invoice=invoice1, customer=invoice1.customer, sales_employee=invoice1.sales_employee,
+            amount=Decimal('20.00'), method=self.cash, created_by=self.admin, payment_date='2026-09-20',
+        )
+        Payment.objects.create(
+            invoice=invoice2, customer=invoice2.customer, sales_employee=invoice2.sales_employee,
+            amount=Decimal('30.00'), method=self.bank, created_by=self.admin, payment_date='2026-09-21',
+        )
+
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:payment_list'))
+        daily = {row['payment_date'].isoformat(): (row['total'], row['count']) for row in resp.context['daily_totals']}
+        self.assertEqual(daily['2026-09-20'], (Decimal('70.00'), 2))
+        self.assertEqual(daily['2026-09-21'], (Decimal('30.00'), 1))
+
+    def test_payment_model_clean_rejects_overpayment_directly(self):
+        invoice = self.make_confirmed_invoice()
+        payment = Payment(
+            invoice=invoice, customer=invoice.customer, amount=Decimal('999.00'),
+            method=self.cash, created_by=self.admin,
+        )
+        with self.assertRaises(ValidationError):
+            payment.save()
+
+    def test_receipt_page_renders(self):
+        invoice = self.make_confirmed_invoice()
+        payment = Payment.objects.create(
+            invoice=invoice, customer=invoice.customer, sales_employee=invoice.sales_employee,
+            amount=Decimal('200.00'), method=self.cash, created_by=self.admin, received_by='Atiq',
+        )
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:payment_view', args=[payment.pk]))
+        self.assertEqual(resp.status_code, 200)
+        self.assertContains(resp, 'PAYMENT RECEIPT')

@@ -65,6 +65,8 @@
                                     <th scope="col" class="px-6 py-3 cursor-pointer">Invoice Date</th>
                                     <th scope="col" class="px-6 py-3 cursor-pointer">Due Date</th>
                                     <th scope="col" class="px-6 py-3 cursor-pointer">Total Amount</th>
+                                    <th scope="col" class="px-6 py-3 cursor-pointer">Paid</th>
+                                    <th scope="col" class="px-6 py-3 cursor-pointer">Due</th>
                                     <th scope="col" class="px-6 py-3 cursor-pointer">Status</th>
                                     <th scope="col" class="px-6 py-3">Actions</th>
                                 </tr>
@@ -81,10 +83,14 @@
                                     <td class="px-6 py-4 whitespace-nowrap">{{ invoice.invoice_date|date:"Y-m-d" }}</td>
                                     <td class="px-6 py-4 whitespace-nowrap">{{ invoice.due_date|date:"Y-m-d" }}</td>
                                     <td class="px-6 py-4 whitespace-nowrap">${{ invoice.total_amount|floatformat:2 }}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap text-green-400">${{ invoice.paid_amount|floatformat:2 }}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap {% if invoice.balance_due > 0 %}text-red-400{% endif %}">${{ invoice.balance_due|floatformat:2 }}</td>
                                     <td class="px-6 py-4 whitespace-nowrap">
                                         <span class="px-2 py-1 text-xs font-semibold rounded-full
                                             {% if invoice.payment_status == 'C' %}
                                                 bg-green-800 text-green-100
+                                            {% elif invoice.payment_status == 'PA' %}
+                                                bg-yellow-800 text-yellow-100
                                             {% else %}
                                                 bg-red-800 text-red-100
                                             {% endif %}">
@@ -120,7 +126,7 @@
                                 </tr>
                                 {% empty %}
                                 <tr>
-                                    <td colspan="9" class="px-6 py-4 text-center text-sm text-gray-400">No invoices available.</td>
+                                    <td colspan="11" class="px-6 py-4 text-center text-sm text-gray-400">No invoices available.</td>
                                 </tr>
                                 {% endfor %}
                             </tbody>
@@ -167,12 +173,14 @@
                     case 3: // Sales Order
                         return parseInt(cellA) - parseInt(cellB) * multiplier;
                     case 2: // Customer
-                    case 7: // Status
+                    case 9: // Status
                         return cellA.localeCompare(cellB) * multiplier;
                     case 4: // Invoice Date
                     case 5: // Due Date
                         return new Date(cellA) - new Date(cellB) * multiplier;
                     case 6: // Total Amount
+                    case 7: // Paid
+                    case 8: // Due
                         return parseFloat(cellA.replace('$', '')) - parseFloat(cellB.replace('$', '')) * multiplier;
                     default:
                         return 0;
@@ -189,7 +197,7 @@
         };
 
         [].forEach.call(headers, (header, index) => {
-            if (index > 0 && index < 8) {
+            if (index > 0 && index < 10) {
                 header.addEventListener('click', () => {
                     sortColumn(index);
                 });

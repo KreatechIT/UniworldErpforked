@@ -151,6 +151,11 @@
                 {% endif %}
             </div>
                     <div class="flex justify-end space-x-4 mt-6">
+                        {% if action == 'View' and form.sales_order.value %}
+                        <a href="{% url 'customer_vendor:sales_order_view' form.sales_order.value %}" class="px-6 py-3 bg-blue-700 text-white rounded-md hover:bg-blue-800 transition-colors duration-300">
+                            View Sales Order
+                        </a>
+                        {% endif %}
                         <a href="{% url 'customer_vendor:sales_order_list' %}" class="px-6 py-3 bg-gray-500 text-white rounded-md hover:bg-gray-600 transition-colors duration-300">
                             Cancel
                         </a>
@@ -170,8 +175,155 @@
                     </div>
                 </form>
 
-                {% if action == 'View' and form.sales_order.value %}
+                {% if action == 'View' %}
                 <div class="mt-6 pt-6 border-t border-[hsl(var(--border))]">
+                    <div class="grid grid-cols-1 sm:grid-cols-3 gap-4 mb-6">
+                        <div class="p-4 rounded-lg bg-[hsl(var(--muted))]">
+                            <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">Total</div>
+                            <div class="text-xl font-semibold">{{ object.total_amount|floatformat:2 }}</div>
+                        </div>
+                        <div class="p-4 rounded-lg bg-[hsl(var(--muted))]">
+                            <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">Paid</div>
+                            <div class="text-xl font-semibold text-green-600">{{ paid_amount|floatformat:2 }}</div>
+                        </div>
+                        <div class="p-4 rounded-lg bg-[hsl(var(--muted))]">
+                            <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">Balance Due</div>
+                            <div class="text-xl font-semibold {% if balance_due > 0 %}text-red-600{% else %}text-green-600{% endif %}">{{ balance_due|floatformat:2 }}</div>
+                        </div>
+                    </div>
+
+                    <div class="flex items-center justify-between mb-3">
+                        <h3 class="text-sm font-semibold text-[hsl(var(--foreground))]">Payments</h3>
+                        {% if perms.uniworlderp.add_payment and balance_due > 0 %}
+                        <button type="button" id="openAddPaymentModal" class="inline-flex items-center px-4 py-2 bg-gradient-to-br from-[#a31319] to-black text-white rounded-md hover:bg-opacity-90 text-sm">
+                            <i class="ri-add-line mr-1"></i> Add Payment
+                        </button>
+                        {% endif %}
+                    </div>
+
+                    <div class="overflow-x-auto mb-6">
+                        <table class="w-full text-sm text-left">
+                            <thead class="text-xs uppercase bg-[hsl(var(--muted))]">
+                                <tr>
+                                    <th class="px-4 py-2">Date</th>
+                                    <th class="px-4 py-2">Method</th>
+                                    <th class="px-4 py-2">Amount</th>
+                                    <th class="px-4 py-2">Received By</th>
+                                    <th class="px-4 py-2">Notes</th>
+                                    <th class="px-4 py-2">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for payment in payments %}
+                                <tr class="border-b border-[hsl(var(--border))]">
+                                    <td class="px-4 py-2 whitespace-nowrap">{{ payment.payment_date|date:"Y-m-d" }}</td>
+                                    <td class="px-4 py-2 whitespace-nowrap">{{ payment.method.name }}</td>
+                                    <td class="px-4 py-2 whitespace-nowrap">{{ payment.amount|floatformat:2 }}</td>
+                                    <td class="px-4 py-2 whitespace-nowrap">{{ payment.received_by|default:"-" }}</td>
+                                    <td class="px-4 py-2">{{ payment.notes|default:"-" }}</td>
+                                    <td class="px-4 py-2 whitespace-nowrap">
+                                        <a href="{% url 'customer_vendor:payment_view' payment.pk %}" class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-800 text-blue-100 hover:bg-blue-700">
+                                            <i class="ri-file-list-3-line mr-1"></i>Receipt
+                                        </a>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="6" class="px-4 py-4 text-center text-[hsl(var(--muted-foreground))]">No payments recorded yet.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+
+                    {% if perms.uniworlderp.add_payment %}
+                    <div id="addPaymentModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black bg-opacity-50 p-4">
+                        <div class="bg-[hsl(var(--background))] rounded-lg shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col">
+                            <div class="flex items-center justify-between p-4 border-b border-[hsl(var(--border))]">
+                                <h3 class="text-lg font-semibold">Add Payment</h3>
+                                <button type="button" id="closeAddPaymentModal" class="text-xl leading-none">&times;</button>
+                            </div>
+                            <form method="post" action="{% url 'customer_vendor:payment_create' object.pk %}" class="flex flex-col overflow-hidden flex-1">
+                                {% csrf_token %}
+                                <div class="overflow-y-auto px-4 py-3 flex-1 space-y-3">
+                                    <p class="text-sm text-[hsl(var(--muted-foreground))]">Balance due: <span class="font-semibold">{{ balance_due|floatformat:2 }}</span></p>
+                                    {% for field in payment_form %}
+                                    <div class="payment-field" data-field="{{ field.name }}">
+                                        <label for="{{ field.id_for_label }}" class="block text-sm font-medium mb-1">
+                                            {{ field.label }}{% if field.field.required %}*{% endif %}
+                                        </label>
+                                        {{ field }}
+                                        {% if field.errors %}
+                                        <div class="text-red-600 text-sm mt-1">
+                                            {% for error in field.errors %}<p>{{ error }}</p>{% endfor %}
+                                        </div>
+                                        {% endif %}
+                                    </div>
+                                    {% endfor %}
+                                </div>
+                                <div class="p-4 border-t border-[hsl(var(--border))] flex justify-end gap-2">
+                                    <button type="button" id="cancelAddPaymentModal" class="px-4 py-2 border border-[hsl(var(--border))] rounded-md">Cancel</button>
+                                    <button type="submit" class="px-4 py-2 bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] rounded-md">Save Payment</button>
+                                </div>
+                            </form>
+                        </div>
+                    </div>
+                    <script>
+                        document.addEventListener('DOMContentLoaded', function () {
+                            const modal = document.getElementById('addPaymentModal');
+                            const openBtn = document.getElementById('openAddPaymentModal');
+                            const closeBtn = document.getElementById('closeAddPaymentModal');
+                            const cancelBtn = document.getElementById('cancelAddPaymentModal');
+                            if (!modal) return;
+
+                            const methodField = modal.querySelector('[name="method"]');
+                            const receivedByField = modal.querySelector('[name="received_by"]');
+                            const fieldsByKind = {
+                                cash: ['received_by'],
+                                bank: ['bank_name', 'account_number', 'transaction_reference'],
+                                cheque: ['cheque_number', 'cheque_date', 'cheque_bank'],
+                                mobile: ['mobile_provider', 'mobile_number', 'transaction_id'],
+                            };
+                            const methodKindByValue = {
+                                {% for method in payment_form.fields.method.queryset %}'{{ method.pk }}': '{{ method.kind }}',{% endfor %}
+                            };
+
+                            function updateReceivedByOther() {
+                                const wrapper = modal.querySelector('.payment-field[data-field="received_by_other"]');
+                                if (!wrapper) return;
+                                const kind = methodKindByValue[methodField.value] || '';
+                                const showCashField = kind === 'cash';
+                                wrapper.style.display = (showCashField && receivedByField.value === 'other') ? '' : 'none';
+                            }
+
+                            function updateVisibleFields() {
+                                const kind = methodKindByValue[methodField.value] || '';
+                                const relevant = fieldsByKind[kind] || [];
+                                Object.values(fieldsByKind).flat().forEach(function (name) {
+                                    const wrapper = modal.querySelector('.payment-field[data-field="' + name + '"]');
+                                    if (wrapper) wrapper.style.display = relevant.includes(name) ? '' : 'none';
+                                });
+                                updateReceivedByOther();
+                            }
+
+                            if (methodField) {
+                                methodField.addEventListener('change', updateVisibleFields);
+                                updateVisibleFields();
+                            }
+                            if (receivedByField) {
+                                receivedByField.addEventListener('change', updateReceivedByOther);
+                            }
+
+                            function openModal() { modal.classList.remove('hidden'); }
+                            function closeModal() { modal.classList.add('hidden'); }
+                            if (openBtn) openBtn.addEventListener('click', openModal);
+                            if (closeBtn) closeBtn.addEventListener('click', closeModal);
+                            if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+                            modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+                        });
+                    </script>
+                    {% endif %}
+
                     <h3 class="text-sm font-semibold text-[hsl(var(--foreground))] mb-2">Note</h3>
                     <form method="post" action="{% url 'customer_vendor:invoice_update_notes' object.pk %}" class="space-y-3">
                         {% csrf_token %}

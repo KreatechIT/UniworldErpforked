@@ -1,24 +1,50 @@
 {% comment %}
-Single-input date range picker. One visible button showing "from to" (or
-"All dates"), opens a small popup with From/To date inputs; the actual
-start_date/end_date form fields are hidden. Include with a unique wrapper_id
-if a page ever needs more than one, then call initDateRangePicker('<id>').
+Date range filter: a trigger button showing the current range, opening a
+popup with Daily / Monthly / Yearly preset tabs and a "Select Date" tab that
+reveals a dual-month calendar for picking any custom start/end. Submits the
+enclosing form via hidden start_date/end_date inputs (YYYY-MM-DD).
 
 Usage: {% include "includes/date_range_filter.html" with wrapper_id="orderDateRange" start_value=request.GET.start_date end_value=request.GET.end_date %}
 {% endcomment %}
-<div id="{{ wrapper_id }}" class="relative w-full sm:w-auto">
-    <button type="button" class="date-range-button form-input py-3 w-full sm:w-56 bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm text-left flex items-center justify-between gap-2">
-        <span class="date-range-label truncate"></span>
+<div id="{{ wrapper_id }}" class="date-range-filter relative w-full sm:w-auto">
+    <button type="button" class="date-range-button form-input py-3 w-full sm:w-64 bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm text-left flex items-center justify-between gap-2">
+        <span class="date-range-label truncate">All dates</span>
         <i class="ri-calendar-line"></i>
     </button>
     <input type="hidden" name="start_date" class="date-range-start-hidden" value="{{ start_value|default:'' }}">
     <input type="hidden" name="end_date" class="date-range-end-hidden" value="{{ end_value|default:'' }}">
-    <div class="date-range-popup hidden absolute z-50 mt-1 bg-white border border-gray-300 rounded-md shadow-lg p-4 w-72">
-        <label class="block text-xs font-medium text-gray-700 mb-1">From</label>
-        <input type="text" inputmode="numeric" placeholder="dd/mm/yyyy" maxlength="10" class="date-range-from w-full p-2 border border-gray-300 rounded-md mb-3 text-gray-900">
-        <label class="block text-xs font-medium text-gray-700 mb-1">To</label>
-        <input type="text" inputmode="numeric" placeholder="dd/mm/yyyy" maxlength="10" class="date-range-to w-full p-2 border border-gray-300 rounded-md mb-3 text-gray-900">
-        <div class="flex justify-end gap-2">
+
+    <div class="date-range-popup hidden absolute z-50 mt-1 bg-white border border-gray-300 rounded-lg shadow-xl text-gray-900 w-[320px] sm:w-[560px]">
+        <div class="flex">
+            <div class="w-32 flex-shrink-0 border-r border-gray-200 py-2">
+                <button type="button" data-preset="daily" class="date-range-preset w-full text-left px-4 py-2 text-sm hover:bg-gray-100">Daily</button>
+                <button type="button" data-preset="monthly" class="date-range-preset w-full text-left px-4 py-2 text-sm hover:bg-gray-100">Monthly</button>
+                <button type="button" data-preset="yearly" class="date-range-preset w-full text-left px-4 py-2 text-sm hover:bg-gray-100">Yearly</button>
+                <button type="button" data-preset="custom" class="date-range-preset w-full text-left px-4 py-2 text-sm hover:bg-gray-100">Select Date</button>
+            </div>
+            <div class="flex-1 p-3">
+                <div class="date-range-calendars hidden">
+                    <div class="flex items-center justify-between mb-2">
+                        <button type="button" class="date-range-prev-month px-2 py-1 hover:bg-gray-100 rounded">
+                            <i class="ri-arrow-left-s-line"></i>
+                        </button>
+                        <div class="flex gap-6 text-sm font-semibold">
+                            <span class="date-range-month-label-0"></span>
+                            <span class="date-range-month-label-1"></span>
+                        </div>
+                        <button type="button" class="date-range-next-month px-2 py-1 hover:bg-gray-100 rounded">
+                            <i class="ri-arrow-right-s-line"></i>
+                        </button>
+                    </div>
+                    <div class="flex gap-4">
+                        <table class="date-range-cal-0 w-full text-center text-xs border-collapse"></table>
+                        <table class="date-range-cal-1 w-full text-center text-xs border-collapse"></table>
+                    </div>
+                </div>
+                <div class="date-range-preset-preview text-sm text-gray-600"></div>
+            </div>
+        </div>
+        <div class="p-3 border-t border-gray-200 flex justify-end gap-2">
             <button type="button" class="date-range-clear px-3 py-1 text-sm bg-gray-200 text-gray-800 rounded-md hover:bg-gray-300">Clear</button>
             <button type="button" class="date-range-apply px-3 py-1 text-sm bg-[#a31319] text-white rounded-md hover:bg-opacity-90">Apply</button>
         </div>

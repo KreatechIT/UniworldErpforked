@@ -255,6 +255,13 @@
                     </button>
                 </form>
                 {% endif %}
+                {% if action == 'View' and object.invoice %}
+                <div class="flex justify-end mt-4">
+                    <a href="{% url 'customer_vendor:invoice_view' object.invoice.pk %}" class="px-6 py-2 bg-blue-700 text-white rounded-lg hover:bg-blue-800">
+                        View Invoice
+                    </a>
+                </div>
+                {% endif %}
             </div>
         </div>
     </div>

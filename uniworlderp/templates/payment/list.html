@@ -1,0 +1,141 @@
+{% extends "base.html" %}
+{% load static %}
+
+{% block main_content %}
+{% include "message.html" %}
+
+<div class="bg-[hsl(var(--background))] rounded-lg shadow-lg overflow-hidden border border-[hsl(var(--border))]">
+    <div class="p-6">
+        <div class="flex flex-col lg:flex-row lg:flex-wrap justify-between items-start lg:items-center mb-4 gap-4">
+            <h2 class="text-2xl font-bold">Payments</h2>
+
+            <form method="get" action="{% url 'customer_vendor:payment_list' %}" class="flex flex-wrap items-center gap-2 w-full sm:w-auto mt-4 sm:mt-0">
+                <div class="relative w-full sm:w-auto">
+                    <input type="text" name="search" placeholder="Search payments..." class="pl-10 pr-4 py-2 border border-[hsl(var(--border))] rounded-md focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:w-56 sm:text-sm bg-[hsl(var(--background))]" value="{{ request.GET.search }}">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <i class="ri-search-line text-[hsl(var(--muted-foreground))]"></i>
+                    </div>
+                </div>
+                <select name="customer" onchange="this.form.submit()" class="form-input py-3 w-full sm:w-auto bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm">
+                    <option value="">All Customers</option>
+                    {% for customer in customers %}
+                        <option value="{{ customer.id }}" {% if selected_customer == customer.id|stringformat:"s" %}selected{% endif %}>{{ customer.name }}</option>
+                    {% endfor %}
+                </select>
+                <select name="sales_employee" onchange="this.form.submit()" class="form-input py-3 w-full sm:w-auto bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm">
+                    <option value="">All Sales Employees</option>
+                    {% for employee in sales_employees %}
+                        <option value="{{ employee.id }}" {% if selected_sales_employee == employee.id|stringformat:"s" %}selected{% endif %}>{{ employee.full_name }}</option>
+                    {% endfor %}
+                </select>
+                <select name="method" onchange="this.form.submit()" class="form-input py-3 w-full sm:w-auto bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm">
+                    <option value="">All Methods</option>
+                    {% for method in methods %}
+                        <option value="{{ method.id }}" {% if selected_method == method.id|stringformat:"s" %}selected{% endif %}>{{ method.name }}</option>
+                    {% endfor %}
+                </select>
+                <input type="text" name="received_by" placeholder="Received by..." class="form-input py-3 w-full sm:w-40 bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm" value="{{ selected_received_by }}">
+                {% include "includes/date_range_filter.html" with wrapper_id="paymentDateRange" start_value=request.GET.start_date end_value=request.GET.end_date %}
+                <button type="submit" class="px-4 py-3 bg-gray-700 text-white rounded-md hover:bg-gray-600 text-sm">Filter</button>
+                {% if request.GET.search or selected_customer or selected_sales_employee or selected_method or selected_received_by or request.GET.start_date or request.GET.end_date %}
+                    <a href="{% url 'customer_vendor:payment_list' %}" class="px-4 py-3 bg-gray-500 text-white rounded-md hover:bg-gray-400 text-sm whitespace-nowrap">Clear</a>
+                {% endif %}
+            </form>
+        </div>
+
+        <div class="flex flex-wrap gap-4 mb-6">
+            <div class="p-4 rounded-lg bg-[hsl(var(--muted))]">
+                <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">Total Collected (filtered)</div>
+                <div class="text-xl font-semibold text-green-600">{{ total_amount|floatformat:2 }}</div>
+            </div>
+            <div class="p-4 rounded-lg bg-[hsl(var(--muted))]">
+                <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">Payments (filtered)</div>
+                <div class="text-xl font-semibold">{{ paginator.count }}</div>
+            </div>
+        </div>
+
+        {% if daily_totals %}
+        <div class="mb-6">
+            <h3 class="text-sm font-semibold mb-2">Collected by Date</h3>
+            <div class="overflow-x-auto">
+                <table class="w-full text-sm text-left border border-[hsl(var(--border))] rounded-md overflow-hidden">
+                    <thead class="text-xs uppercase bg-[hsl(var(--muted))]">
+                        <tr>
+                            <th class="px-4 py-2">Date</th>
+                            <th class="px-4 py-2">Payments</th>
+                            <th class="px-4 py-2">Collected</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                        {% for day in daily_totals %}
+                        <tr class="border-t border-[hsl(var(--border))]">
+                            <td class="px-4 py-2 whitespace-nowrap">{{ day.payment_date|date:"Y-m-d" }}</td>
+                            <td class="px-4 py-2">{{ day.count }}</td>
+                            <td class="px-4 py-2 font-semibold text-green-600">{{ day.total|floatformat:2 }}</td>
+                        </tr>
+                        {% endfor %}
+                    </tbody>
+                </table>
+            </div>
+        </div>
+        {% endif %}
+
+        <div class="overflow-x-auto table-container">
+            <div class="bg-gradient-to-br from-[#a31319] to-black rounded-lg shadow-lg overflow-hidden">
+                <div class="p-6">
+                    <div class="overflow-x-auto">
+                        <table class="w-full text-sm text-left text-gray-200">
+                            <thead class="text-xs uppercase bg-[#480d0f] text-gray-100">
+                                <tr>
+                                    <th scope="col" class="px-6 py-3">Date</th>
+                                    <th scope="col" class="px-6 py-3">Payment #</th>
+                                    <th scope="col" class="px-6 py-3">Customer</th>
+                                    <th scope="col" class="px-6 py-3">Invoice / SO #</th>
+                                    <th scope="col" class="px-6 py-3">Method</th>
+                                    <th scope="col" class="px-6 py-3">Amount</th>
+                                    <th scope="col" class="px-6 py-3">Received By</th>
+                                    <th scope="col" class="px-6 py-3">Notes</th>
+                                    <th scope="col" class="px-6 py-3">Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                {% for payment in payments %}
+                                <tr class="border-b border-gray-700 hover:bg-[#5a1114] transition-colors">
+                                    <td class="px-6 py-4 whitespace-nowrap">{{ payment.payment_date|date:"Y-m-d" }}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap font-medium">{{ payment.id }}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap">{{ payment.customer.name }}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        #{{ payment.invoice.id }}{% if payment.invoice.sales_order %} / SO-{{ payment.invoice.sales_order.id }}{% endif %}
+                                    </td>
+                                    <td class="px-6 py-4 whitespace-nowrap">{{ payment.method.name }}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap">{{ payment.amount|floatformat:2 }}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap">{{ payment.received_by|default:"-" }}</td>
+                                    <td class="px-6 py-4">{{ payment.notes|default:"-" }}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap">
+                                        <div class="flex space-x-2">
+                                            <a href="{% url 'customer_vendor:invoice_view' payment.invoice.pk %}"
+                                               class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-800 text-blue-100 hover:bg-blue-700">
+                                                <i class="ri-file-list-3-line mr-1"></i>Invoice
+                                            </a>
+                                            <a href="{% url 'customer_vendor:payment_view' payment.pk %}" target="_blank"
+                                               class="px-2 py-1 text-xs font-semibold rounded-full bg-green-800 text-green-100 hover:bg-green-700">
+                                                <i class="ri-printer-line mr-1"></i>Receipt
+                                            </a>
+                                        </div>
+                                    </td>
+                                </tr>
+                                {% empty %}
+                                <tr>
+                                    <td colspan="9" class="px-6 py-4 text-center text-sm text-gray-400">No payments found.</td>
+                                </tr>
+                                {% endfor %}
+                            </tbody>
+                        </table>
+                    </div>
+                </div>
+                {% include "includes/pagination.html" with page_obj=page_obj %}
+            </div>
+        </div>
+    </div>
+</div>
+{% endblock %}

@@ -1,0 +1,102 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>Payment Receipt #{{ payment.id }}</title>
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            theme: { extend: { colors: { primary: '#b01116' } } },
+        }
+    </script>
+    <style>
+        @page { size: A5; margin: 0; }
+        @media print {
+            body { print-color-adjust: exact; -webkit-print-color-adjust: exact; margin: 0; padding: 0; }
+            .no-print { display: none; }
+            .receipt-container { margin: 0 !important; box-shadow: none !important; }
+        }
+        body { font-size: 14px; margin: 0; padding: 0; min-height: 100vh; display: flex; flex-direction: column; align-items: center; }
+        .receipt-container { width: 14.8cm; margin: 1rem auto; background: white; }
+    </style>
+    <script>
+        window.onload = function() { window.print(); }
+        function handlePrint() { window.print(); }
+    </script>
+</head>
+<body class="bg-gray-100">
+    <div class="no-print">
+        <button onclick="handlePrint()" class="bg-primary text-white px-6 py-3 rounded-lg m-6 text-xl font-bold">Print Receipt</button>
+    </div>
+    <div class="receipt-container shadow-lg p-8">
+        <div class="flex justify-between items-start mb-6 border-b-2 border-primary pb-4">
+            <img src="{% static 'images/logo.png' %}" alt="Company" class="w-40">
+            <div class="text-right">
+                <h1 class="text-2xl font-bold text-primary">PAYMENT RECEIPT</h1>
+                <p>Receipt #: {{ payment.id }}</p>
+                <p>Date: {{ payment.payment_date|date:"m/d/Y" }}</p>
+            </div>
+        </div>
+
+        <div class="mb-6">
+            <p><span class="font-semibold">Received from:</span> {{ payment.customer.name }}</p>
+            <p><span class="font-semibold">Invoice:</span> #{{ payment.invoice.id }}{% if payment.invoice.sales_order %} (Sales Order #{{ payment.invoice.sales_order.id }}){% endif %}</p>
+            {% if payment.sales_employee %}<p><span class="font-semibold">Sales Employee:</span> {{ payment.sales_employee.full_name }}</p>{% endif %}
+        </div>
+
+        <table class="w-full mb-6 border-collapse border-2 border-gray-300 text-base">
+            <tr class="border border-gray-300">
+                <td class="px-3 py-2 font-semibold bg-gray-100">Method</td>
+                <td class="px-3 py-2">{{ payment.method.name }}</td>
+            </tr>
+            {% if payment.received_by %}
+            <tr class="border border-gray-300">
+                <td class="px-3 py-2 font-semibold bg-gray-100">Received By</td>
+                <td class="px-3 py-2">{{ payment.received_by }}</td>
+            </tr>
+            {% endif %}
+            {% if payment.bank_name %}
+            <tr class="border border-gray-300">
+                <td class="px-3 py-2 font-semibold bg-gray-100">Bank</td>
+                <td class="px-3 py-2">{{ payment.bank_name }}{% if payment.account_number %} - {{ payment.account_number }}{% endif %}</td>
+            </tr>
+            {% endif %}
+            {% if payment.transaction_reference %}
+            <tr class="border border-gray-300">
+                <td class="px-3 py-2 font-semibold bg-gray-100">Reference</td>
+                <td class="px-3 py-2">{{ payment.transaction_reference }}</td>
+            </tr>
+            {% endif %}
+            {% if payment.cheque_number %}
+            <tr class="border border-gray-300">
+                <td class="px-3 py-2 font-semibold bg-gray-100">Cheque</td>
+                <td class="px-3 py-2">{{ payment.cheque_number }}{% if payment.cheque_bank %} - {{ payment.cheque_bank }}{% endif %}{% if payment.cheque_date %} - {{ payment.cheque_date|date:"Y-m-d" }}{% endif %}</td>
+            </tr>
+            {% endif %}
+            {% if payment.mobile_provider %}
+            <tr class="border border-gray-300">
+                <td class="px-3 py-2 font-semibold bg-gray-100">Mobile</td>
+                <td class="px-3 py-2">{{ payment.mobile_provider }}{% if payment.mobile_number %} - {{ payment.mobile_number }}{% endif %}{% if payment.transaction_id %} - {{ payment.transaction_id }}{% endif %}</td>
+            </tr>
+            {% endif %}
+            {% if payment.notes %}
+            <tr class="border border-gray-300">
+                <td class="px-3 py-2 font-semibold bg-gray-100">Notes</td>
+                <td class="px-3 py-2">{{ payment.notes }}</td>
+            </tr>
+            {% endif %}
+            <tr class="border-2 border-gray-300 font-bold text-xl bg-yellow-50">
+                <td class="px-3 py-3">Amount Received</td>
+                <td class="px-3 py-3">{{ payment.amount|floatformat:2 }}</td>
+            </tr>
+        </table>
+
+        <div class="text-sm text-gray-600">
+            <p>Invoice Total: {{ payment.invoice.total_amount|floatformat:2 }}</p>
+            <p>Balance Due After This Payment: {{ payment.invoice.balance_due|floatformat:2 }}</p>
+        </div>
+    </div>
+</body>
+</html>

@@ -460,7 +460,8 @@ class ARInvoiceManager(models.Manager):
 class ARInvoice(models.Model):
     PAYMENT_STATUS_CHOICES = [
         ('P', 'Pending'),
-        ('C', 'Completed'),
+        ('PA', 'Partial'),
+        ('C', 'Paid'),
     ]
 
     id = models.BigAutoField(primary_key=True)
@@ -472,7 +473,7 @@ class ARInvoice(models.Model):
     total_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
     discount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), help_text="Discount amount to be subtracted from subtotal")
     shipping = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), help_text="Shipping amount to be added to subtotal after discount")
-    payment_status = models.CharField(max_length=1, choices=PAYMENT_STATUS_CHOICES, default='P', db_index=True)
+    payment_status = models.CharField(max_length=2, choices=PAYMENT_STATUS_CHOICES, default='P', db_index=True)
     notes = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
@@ -491,6 +492,28 @@ class ARInvoice(models.Model):
         subtotal = self.invoice_items.aggregate(total=models.Sum('total_amount'))['total'] or Decimal('0.00')
         self.total_amount = subtotal - self.discount + self.shipping
         super().save(*args, **kwargs)
+
+    @property
+    def paid_amount(self):
+        if 'payments' in getattr(self, '_prefetched_objects_cache', {}):
+            return sum((p.amount for p in self.payments.all()), Decimal('0.00'))
+        return self.payments.aggregate(total=models.Sum('amount'))['total'] or Decimal('0.00')
+
+    @property
+    def balance_due(self):
+        return self.total_amount - self.paid_amount
+
+    def recompute_payment_status(self):
+        paid = self.paid_amount
+        if paid <= 0:
+            new_status = 'P'
+        elif paid >= self.total_amount:
+            new_status = 'C'
+        else:
+            new_status = 'PA'
+        if new_status != self.payment_status:
+            self.payment_status = new_status
+            ARInvoice.objects.filter(pk=self.pk).update(payment_status=new_status)
 
     class Meta:
         verbose_name = ' AR Invoice'
@@ -525,6 +548,87 @@ class ARInvoiceItem(models.Model):
         ]
 
 
+class PaymentMethod(models.Model):
+    KIND_CHOICES = [
+        ('cash', 'Cash'),
+        ('bank', 'Bank'),
+        ('cheque', 'Cheque'),
+        ('mobile', 'Mobile'),
+    ]
+
+    name = models.CharField(max_length=100, unique=True)
+    kind = models.CharField(max_length=10, choices=KIND_CHOICES)
+    is_active = models.BooleanField(default=True)
+    details = models.CharField(max_length=255, blank=True, null=True, help_text="Account number, wallet number, etc.")
+
+    def __str__(self):
+        return self.name
+
+    class Meta:
+        verbose_name = 'Payment Method'
+        verbose_name_plural = 'Payment Methods'
+        ordering = ['name']
+
+
+class Payment(models.Model):
+    invoice = models.ForeignKey(ARInvoice, on_delete=models.CASCADE, related_name='payments')
+    customer = models.ForeignKey('CustomerVendor', on_delete=models.CASCADE, related_name='payments')
+    sales_employee = models.ForeignKey('SalesEmployee', on_delete=models.SET_NULL, null=True, blank=True, related_name='payments')
+    payment_date = models.DateField(default=timezone.now, db_index=True)
+    amount = models.DecimalField(max_digits=12, decimal_places=2)
+    method = models.ForeignKey(PaymentMethod, on_delete=models.PROTECT, related_name='payments')
+
+    received_by = models.CharField(max_length=100, blank=True, null=True)
+    bank_name = models.CharField(max_length=100, blank=True, null=True)
+    account_number = models.CharField(max_length=100, blank=True, null=True)
+    transaction_reference = models.CharField(max_length=100, blank=True, null=True)
+    cheque_number = models.CharField(max_length=100, blank=True, null=True)
+    cheque_date = models.DateField(blank=True, null=True)
+    cheque_bank = models.CharField(max_length=100, blank=True, null=True)
+    mobile_provider = models.CharField(max_length=50, blank=True, null=True)
+    mobile_number = models.CharField(max_length=20, blank=True, null=True)
+    transaction_id = models.CharField(max_length=100, blank=True, null=True)
+
+    notes = models.TextField(blank=True, null=True)
+    created_by = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='payments_created')
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"Payment #{self.id} - {self.invoice} - {self.amount}"
+
+    def clean(self):
+        super().clean()
+        if self.amount is not None and self.amount <= 0:
+            raise ValidationError(_("Payment amount must be greater than zero."))
+        if self.invoice_id and self.amount is not None:
+            other_payments = self.invoice.payments.exclude(pk=self.pk).aggregate(
+                total=models.Sum('amount')
+            )['total'] or Decimal('0.00')
+            balance = self.invoice.total_amount - other_payments
+            if self.amount > balance:
+                raise ValidationError(_("Payment amount exceeds the invoice's balance due."))
+
+    @transaction.atomic
+    def save(self, *args, **kwargs):
+        self.full_clean()
+        super().save(*args, **kwargs)
+        self.invoice.recompute_payment_status()
+
+    @transaction.atomic
+    def delete(self, *args, **kwargs):
+        invoice = self.invoice
+        super().delete(*args, **kwargs)
+        invoice.recompute_payment_status()
+
+    class Meta:
+        verbose_name = 'Payment'
+        verbose_name_plural = 'Payments'
+        ordering = ['-payment_date', '-id']
+        indexes = [
+            models.Index(fields=['payment_date']),
+            models.Index(fields=['invoice', 'payment_date']),
+        ]
 
 
 

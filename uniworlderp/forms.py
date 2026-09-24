@@ -14,7 +14,8 @@ from django.utils.safestring import mark_safe
 
 from .models import (
     CustomerVendor, SalesEmployee, Product, SalesOrder, SalesOrderItem, ReturnSales, ReturnSalesItem,
-    ARInvoice, ARInvoiceItem, PurchaseOrder, PurchaseOrderItem,StockTransaction
+    ARInvoice, ARInvoiceItem, PurchaseOrder, PurchaseOrderItem,StockTransaction,
+    Payment, PaymentMethod
 )
 from decimal import Decimal, InvalidOperation
 
@@ -384,6 +385,48 @@ class ARInvoiceNotesForm(BaseStyleForm):
     class Meta:
         model = ARInvoice
         fields = ['notes']
+
+
+class PaymentForm(BaseStyleForm):
+    received_by = forms.CharField(required=False, widget=forms.Select())
+    received_by_other = forms.CharField(required=False, widget=forms.TextInput(attrs={'class': BASE_FIELD_CLASSES, 'placeholder': 'Name'}))
+
+    class Meta:
+        model = Payment
+        fields = [
+            'payment_date', 'amount', 'method',
+            'received_by', 'bank_name', 'account_number', 'transaction_reference',
+            'cheque_number', 'cheque_date', 'cheque_bank',
+            'mobile_provider', 'mobile_number', 'transaction_id',
+            'notes',
+        ]
+        widgets = {
+            'payment_date': forms.DateInput(attrs={'type': 'date', 'class': BASE_FIELD_CLASSES}),
+            'cheque_date': forms.DateInput(attrs={'type': 'date', 'class': BASE_FIELD_CLASSES}),
+            'notes': forms.Textarea(attrs={'rows': 2, 'class': BASE_FIELD_CLASSES}),
+        }
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        self.fields['method'].queryset = PaymentMethod.objects.filter(is_active=True)
+        employee_names = SalesEmployee.objects.order_by('full_name').values_list('full_name', flat=True)
+        self.fields['received_by'].widget.choices = (
+            [('', '---------')] + [(name, name) for name in employee_names] + [('other', 'Other / Admin')]
+        )
+        for name in ('received_by', 'received_by_other', 'bank_name', 'account_number', 'transaction_reference',
+                     'cheque_number', 'cheque_date', 'cheque_bank',
+                     'mobile_provider', 'mobile_number', 'transaction_id', 'notes'):
+            self.fields[name].required = False
+        if not self.is_bound and not self.initial.get('method'):
+            cash_method = self.fields['method'].queryset.filter(kind='cash').first()
+            if cash_method:
+                self.fields['method'].initial = cash_method.pk
+
+    def clean_received_by(self):
+        value = self.cleaned_data.get('received_by')
+        if value == 'other':
+            return self.data.get('received_by_other', '').strip()
+        return value
 
 class ARInvoiceItemForm(BaseOrderItemForm):
     class Meta:

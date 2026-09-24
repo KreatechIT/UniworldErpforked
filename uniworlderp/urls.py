@@ -1,5 +1,5 @@
 from django.urls import path
-from uniworlderp.views import customer_views, sales_employee_views,product_views,sales_order_views,invoice_views,purchase_views,materials_purchase_views,report_views
+from uniworlderp.views import customer_views, sales_employee_views,product_views,sales_order_views,invoice_views,purchase_views,materials_purchase_views,report_views,payment_views
 from . import views
 
 app_name = 'customer_vendor'
@@ -57,9 +57,15 @@ urlpatterns = [
     path('invoices/delete/<int:pk>/', invoice_views.ARInvoiceDeleteView.as_view(), name='invoice_delete'),
     path('invoices/notes/<int:pk>/', invoice_views.ARInvoiceNotesUpdateView.as_view(), name='invoice_update_notes'),
     path('invoices/print/<int:pk>/', invoice_views.ARInvoicePrintView.as_view(), name='invoice_print'),
-    path('invoices/search/', invoice_views.ARInvoiceSearchView.as_view(), name='invoice_search'),   
+    path('invoices/search/', invoice_views.ARInvoiceSearchView.as_view(), name='invoice_search'),
 
-  
+    path('payments/', payment_views.PaymentListView.as_view(), name='payment_list'),
+    path('payments/create/<int:invoice_id>/', payment_views.PaymentCreateView.as_view(), name='payment_create'),
+    path('payments/update/<int:pk>/', payment_views.PaymentUpdateView.as_view(), name='payment_update'),
+    path('payments/view/<int:pk>/', payment_views.PaymentDetailView.as_view(), name='payment_view'),
+    path('payments/delete/<int:pk>/', payment_views.PaymentDeleteView.as_view(), name='payment_delete'),
+
+
 
     path('purchase-orders/', purchase_views.PurchaseOrderListView.as_view(), name='purchase_order_list'),
     path('purchase-orders/create/', purchase_views.PurchaseOrderCreateView.as_view(), name='purchase_order_create'),

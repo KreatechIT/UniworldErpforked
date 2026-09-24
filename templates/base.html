@@ -941,6 +941,12 @@ textarea.form-input {
                         <span>Invoice </span>
                     </a>
                 {% endif %}
+                {% if show_payment_menu %}
+                    <a href="{% url 'customer_vendor:payment_list' %}" class="nav-link">
+                        <i class="ri-money-dollar-circle-line"></i>
+                        <span>Payments</span>
+                    </a>
+                {% endif %}
                 {% if show_purchase_menu %}
                     {% comment %} <a href="{% url 'customer_vendor:purchase_order_list' %}" class="nav-link">
                         <i class="ri-store-2-line"></i> <!-- Updated Icon -->
@@ -1557,85 +1563,202 @@ textarea.form-input {
             return false;
         };
 
-        // Wires up a "date_range_filter.html" include: a single button showing
-        // the current from/to range, a small popup with two date inputs, and
-        // two hidden inputs (start_date/end_date) that the form actually submits.
-        // wrapperId lets a page host more than one of these at once.
         window.initDateRangePicker = function(wrapperId) {
             const wrapper = document.getElementById(wrapperId);
             if (!wrapper) return;
+
             const button = wrapper.querySelector('.date-range-button');
             const label = wrapper.querySelector('.date-range-label');
             const popup = wrapper.querySelector('.date-range-popup');
-            const fromInput = wrapper.querySelector('.date-range-from');
-            const toInput = wrapper.querySelector('.date-range-to');
             const startHidden = wrapper.querySelector('.date-range-start-hidden');
             const endHidden = wrapper.querySelector('.date-range-end-hidden');
             const clearBtn = wrapper.querySelector('.date-range-clear');
             const applyBtn = wrapper.querySelector('.date-range-apply');
+            const presetButtons = wrapper.querySelectorAll('.date-range-preset');
+            const calendarsBlock = wrapper.querySelector('.date-range-calendars');
+            const previewBlock = wrapper.querySelector('.date-range-preset-preview');
+            const prevMonthBtn = wrapper.querySelector('.date-range-prev-month');
+            const nextMonthBtn = wrapper.querySelector('.date-range-next-month');
+            const monthLabels = [wrapper.querySelector('.date-range-month-label-0'), wrapper.querySelector('.date-range-month-label-1')];
+            const calTables = [wrapper.querySelector('.date-range-cal-0'), wrapper.querySelector('.date-range-cal-1')];
 
-            // dd/mm/yyyy is a plain masked text input, not a native date input -
-            // Chromium's date input format follows the browser/OS locale, not
-            // the element's lang attribute, so it can't be forced that way.
-            function toDMY(isoDate) {
-                if (!isoDate) return '';
-                const parts = isoDate.split('-');
-                return parts.length === 3 ? (parts[2] + '/' + parts[1] + '/' + parts[0]) : isoDate;
+            const MONTH_NAMES = ['January', 'February', 'March', 'April', 'May', 'June', 'July', 'August', 'September', 'October', 'November', 'December'];
+            const DAY_NAMES = ['Su', 'Mo', 'Tu', 'We', 'Th', 'Fr', 'Sa'];
+
+            function pad(n) { return n < 10 ? '0' + n : '' + n; }
+            function toISO(d) { return d.getFullYear() + '-' + pad(d.getMonth() + 1) + '-' + pad(d.getDate()); }
+            function fromISO(iso) {
+                if (!iso) return null;
+                const parts = iso.split('-').map(Number);
+                return new Date(parts[0], parts[1] - 1, parts[2]);
+            }
+            function today() { const d = new Date(); d.setHours(0, 0, 0, 0); return d; }
+
+            let activePreset = 'custom';
+            let pendingStart = fromISO(startHidden.value);
+            let pendingEnd = fromISO(endHidden.value);
+            let hoverDate = null;
+            let leftMonth = today();
+
+            function formatLabel(d) {
+                return MONTH_NAMES[d.getMonth()].slice(0, 3) + ' ' + d.getDate() + ', ' + d.getFullYear();
             }
 
-            function toISO(dmy) {
-                const match = /^(\d{2})\/(\d{2})\/(\d{4})$/.exec(dmy || '');
-                return match ? (match[3] + '-' + match[2] + '-' + match[1]) : '';
-            }
-
-            function attachDateMask(input) {
-                input.addEventListener('input', function() {
-                    const digits = input.value.replace(/\D/g, '').slice(0, 8);
-                    if (digits.length > 4) {
-                        input.value = digits.slice(0, 2) + '/' + digits.slice(2, 4) + '/' + digits.slice(4);
-                    } else if (digits.length > 2) {
-                        input.value = digits.slice(0, 2) + '/' + digits.slice(2);
-                    } else {
-                        input.value = digits;
-                    }
-                });
-            }
-            attachDateMask(fromInput);
-            attachDateMask(toInput);
-
-            function updateLabel() {
+            function updateButtonLabel() {
                 if (startHidden.value && endHidden.value) {
-                    label.textContent = startHidden.value === endHidden.value ? toDMY(startHidden.value) : (toDMY(startHidden.value) + ' to ' + toDMY(endHidden.value));
-                } else if (startHidden.value || endHidden.value) {
-                    label.textContent = (toDMY(startHidden.value) || '...') + ' to ' + (toDMY(endHidden.value) || '...');
+                    label.textContent = startHidden.value === endHidden.value
+                        ? formatLabel(fromISO(startHidden.value))
+                        : formatLabel(fromISO(startHidden.value)) + ' - ' + formatLabel(fromISO(endHidden.value));
                 } else {
                     label.textContent = 'All dates';
                 }
             }
 
-            fromInput.value = toDMY(startHidden.value);
-            toInput.value = toDMY(endHidden.value);
-            updateLabel();
+            function renderMonth(table, monthDate, labelEl) {
+                labelEl.textContent = MONTH_NAMES[monthDate.getMonth()] + ' ' + monthDate.getFullYear();
+                table.innerHTML = '';
+                const head = document.createElement('tr');
+                DAY_NAMES.forEach(function(dn) {
+                    const th = document.createElement('th');
+                    th.className = 'text-gray-400 font-normal pb-1';
+                    th.textContent = dn;
+                    head.appendChild(th);
+                });
+                table.appendChild(head);
+
+                const year = monthDate.getFullYear();
+                const month = monthDate.getMonth();
+                const firstDay = new Date(year, month, 1).getDay();
+                const daysInMonth = new Date(year, month + 1, 0).getDate();
+
+                let row = document.createElement('tr');
+                for (let i = 0; i < firstDay; i++) {
+                    row.appendChild(document.createElement('td'));
+                }
+                for (let day = 1; day <= daysInMonth; day++) {
+                    const cellDate = new Date(year, month, day);
+                    const iso = toISO(cellDate);
+                    const td = document.createElement('td');
+                    td.className = 'p-0.5';
+                    const btn = document.createElement('button');
+                    btn.type = 'button';
+                    btn.textContent = day;
+                    btn.dataset.date = iso;
+                    btn.className = 'w-7 h-7 rounded-full text-xs hover:bg-gray-200';
+
+                    if (pendingStart && iso === toISO(pendingStart)) btn.classList.add('bg-[#a31319]', 'text-white');
+                    if (pendingEnd && iso === toISO(pendingEnd)) btn.classList.add('bg-[#a31319]', 'text-white');
+                    if (pendingStart && pendingEnd && cellDate > pendingStart && cellDate < pendingEnd) {
+                        btn.classList.add('bg-red-100');
+                    }
+                    if (pendingStart && !pendingEnd && hoverDate && cellDate > pendingStart && cellDate <= hoverDate) {
+                        btn.classList.add('bg-red-100');
+                    }
+
+                    btn.addEventListener('click', function() { onDayClick(cellDate); });
+                    btn.addEventListener('mouseenter', function() {
+                        if (pendingStart && !pendingEnd) { hoverDate = cellDate; renderCalendars(); }
+                    });
+
+                    td.appendChild(btn);
+                    row.appendChild(td);
+                    if ((firstDay + day) % 7 === 0) {
+                        table.appendChild(row);
+                        row = document.createElement('tr');
+                    }
+                }
+                if (row.children.length) table.appendChild(row);
+            }
+
+            function renderCalendars() {
+                const rightMonth = new Date(leftMonth.getFullYear(), leftMonth.getMonth() + 1, 1);
+                renderMonth(calTables[0], leftMonth, monthLabels[0]);
+                renderMonth(calTables[1], rightMonth, monthLabels[1]);
+            }
+
+            function onDayClick(clickedDate) {
+                if (!pendingStart || (pendingStart && pendingEnd)) {
+                    pendingStart = clickedDate;
+                    pendingEnd = null;
+                } else if (clickedDate < pendingStart) {
+                    pendingEnd = pendingStart;
+                    pendingStart = clickedDate;
+                } else {
+                    pendingEnd = clickedDate;
+                }
+                hoverDate = null;
+                renderCalendars();
+            }
+
+            function setPreset(preset) {
+                activePreset = preset;
+                presetButtons.forEach(function(btn) {
+                    btn.classList.toggle('bg-gray-100', btn.dataset.preset === preset);
+                    btn.classList.toggle('font-semibold', btn.dataset.preset === preset);
+                });
+
+                const t = today();
+                if (preset === 'daily') {
+                    pendingStart = t;
+                    pendingEnd = t;
+                    calendarsBlock.classList.add('hidden');
+                    previewBlock.classList.remove('hidden');
+                    previewBlock.textContent = formatLabel(t);
+                } else if (preset === 'monthly') {
+                    pendingStart = new Date(t.getFullYear(), t.getMonth(), 1);
+                    pendingEnd = t;
+                    calendarsBlock.classList.add('hidden');
+                    previewBlock.classList.remove('hidden');
+                    previewBlock.textContent = formatLabel(pendingStart) + ' - ' + formatLabel(pendingEnd);
+                } else if (preset === 'yearly') {
+                    pendingStart = new Date(t.getFullYear(), 0, 1);
+                    pendingEnd = t;
+                    calendarsBlock.classList.add('hidden');
+                    previewBlock.classList.remove('hidden');
+                    previewBlock.textContent = formatLabel(pendingStart) + ' - ' + formatLabel(pendingEnd);
+                } else {
+                    calendarsBlock.classList.remove('hidden');
+                    previewBlock.classList.add('hidden');
+                    leftMonth = pendingStart ? new Date(pendingStart.getFullYear(), pendingStart.getMonth(), 1) : new Date(t.getFullYear(), t.getMonth(), 1);
+                    renderCalendars();
+                }
+            }
+
+            presetButtons.forEach(function(btn) {
+                btn.addEventListener('click', function() { setPreset(btn.dataset.preset); });
+            });
+
+            prevMonthBtn.addEventListener('click', function() {
+                leftMonth = new Date(leftMonth.getFullYear(), leftMonth.getMonth() - 1, 1);
+                renderCalendars();
+            });
+            nextMonthBtn.addEventListener('click', function() {
+                leftMonth = new Date(leftMonth.getFullYear(), leftMonth.getMonth() + 1, 1);
+                renderCalendars();
+            });
 
             button.addEventListener('click', function(e) {
                 e.preventDefault();
                 popup.classList.toggle('hidden');
+                if (!popup.classList.contains('hidden')) {
+                    setPreset(activePreset);
+                }
             });
 
             applyBtn.addEventListener('click', function() {
-                startHidden.value = toISO(fromInput.value);
-                endHidden.value = toISO(toInput.value);
-                updateLabel();
+                startHidden.value = pendingStart ? toISO(pendingStart) : '';
+                endHidden.value = pendingEnd ? toISO(pendingEnd || pendingStart) : (pendingStart ? toISO(pendingStart) : '');
+                updateButtonLabel();
                 popup.classList.add('hidden');
                 wrapper.closest('form').submit();
             });
 
             clearBtn.addEventListener('click', function() {
-                fromInput.value = '';
-                toInput.value = '';
+                pendingStart = null;
+                pendingEnd = null;
                 startHidden.value = '';
                 endHidden.value = '';
-                updateLabel();
+                updateButtonLabel();
                 popup.classList.add('hidden');
                 wrapper.closest('form').submit();
             });
@@ -1645,7 +1768,10 @@ textarea.form-input {
                     popup.classList.add('hidden');
                 }
             });
+
+            updateButtonLabel();
         };
+
     </script>
 
     {% block extra_js %}
