@@ -1,6 +1,6 @@
 from .common_imports import *
-from uniworlderp.models import ARInvoice, ARInvoiceItem, Product, StockTransaction, SalesEmployee, SalesOrder
-from uniworlderp.forms import ARInvoiceForm, ARInvoiceItemFormSet,ARInvoiceItemForm,get_ar_invoice_item_formset
+from uniworlderp.models import ARInvoice, ARInvoiceItem, CustomerVendor, Product, StockTransaction, SalesEmployee, SalesOrder
+from uniworlderp.forms import ARInvoiceForm, ARInvoiceItemFormSet,ARInvoiceItemForm,get_ar_invoice_item_formset, ARInvoiceNotesForm
 from company.models import Company, Branch, ContactPerson
 
 class ARInvoiceListView(ListView):
@@ -11,6 +11,12 @@ class ARInvoiceListView(ListView):
 
     def get_queryset(self):
         search_query = self.request.GET.get('search', '')
+        payment_status = self.request.GET.get('payment_status', '')
+        customer_id = self.request.GET.get('customer', '')
+        sales_employee_id = self.request.GET.get('sales_employee', '')
+        start_date = self.request.GET.get('start_date', '')
+        end_date = self.request.GET.get('end_date', '')
+
         queryset = ARInvoice.objects.all().order_by('-invoice_date')
 
         if search_query:
@@ -20,12 +26,28 @@ class ARInvoiceListView(ListView):
                 Q(sales_employee__user__username__icontains=search_query) |
                 Q(invoice_date__icontains=search_query)
             )
+        if payment_status:
+            queryset = queryset.filter(payment_status=payment_status)
+        if customer_id:
+            queryset = queryset.filter(customer_id=customer_id)
+        if sales_employee_id:
+            queryset = queryset.filter(sales_employee_id=sales_employee_id)
+        if start_date:
+            queryset = queryset.filter(invoice_date__gte=start_date)
+        if end_date:
+            queryset = queryset.filter(invoice_date__lte=end_date)
 
         return queryset
 
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         context['search_query'] = self.request.GET.get('search', '')
+        context['selected_payment_status'] = self.request.GET.get('payment_status', '')
+        context['selected_customer'] = self.request.GET.get('customer', '')
+        context['selected_sales_employee'] = self.request.GET.get('sales_employee', '')
+        context['payment_status_choices'] = ARInvoice.PAYMENT_STATUS_CHOICES
+        context['customers'] = CustomerVendor.objects.filter(entity_type='customer').order_by('name')
+        context['sales_employees'] = SalesEmployee.objects.order_by('full_name')
         return context
 from django.forms import inlineformset_factory
 
@@ -283,6 +305,8 @@ class ARInvoiceDetailView(PermissionRequiredMixin, DetailView):
                 field.widget.attrs['disabled'] = 'disabled'
         for field in context['form'].fields.values():
             field.widget.attrs['disabled'] = 'disabled'
+        context['is_locked'] = bool(self.object.sales_order_id)
+        context['notes_form'] = ARInvoiceNotesForm(instance=self.object)
         return context
 
     def get_common_context(self):
@@ -304,6 +328,25 @@ class ARInvoiceDetailView(PermissionRequiredMixin, DetailView):
             'next_id': invoices.filter(id__gt=current_invoice.id).first().id if invoices.filter(id__gt=current_invoice.id).exists() else None,
             'current_id': current_invoice.id,
         }
+
+@method_decorator(require_POST, name='dispatch')
+class ARInvoiceNotesUpdateView(LoginRequiredMixin, PermissionRequiredMixin, View):
+    permission_required = 'uniworlderp.change_arinvoice'
+
+    def handle_no_permission(self):
+        messages.error(self.request, "You do not have permission to edit this invoice.")
+        return redirect('customer_vendor:invoice_list')
+
+    def post(self, request, pk):
+        invoice = get_object_or_404(ARInvoice, pk=pk)
+        form = ARInvoiceNotesForm(request.POST, instance=invoice)
+        if form.is_valid():
+            form.save()
+            messages.success(request, "Note saved.")
+        else:
+            messages.error(request, "Could not save note.")
+        return redirect('customer_vendor:invoice_view', pk=invoice.pk)
+
 
 class ARInvoiceDeleteView(LoginRequiredMixin, PermissionRequiredMixin, DeleteView):
     model = ARInvoice

@@ -264,11 +264,8 @@ class SalesOrder(models.Model):
 
     def update_total_amount(self):
         subtotal = sum(item.total for item in self.order_items.all())
-        old_total = self.total_amount
         self.total_amount = subtotal - self.discount + self.shipping
-        print(f"      [MODEL] Updating Sales Order Total: Old={old_total}, New={self.total_amount}, Subtotal={subtotal}, Discount={self.discount}, Shipping={self.shipping}")
         self.save(update_fields=['total_amount'])
-        print(f"      [MODEL] ✓ Sales Order total updated")
 
     def save(self, *args, **kwargs):
         request = kwargs.pop('request', None)
@@ -470,10 +467,13 @@ class ARInvoice(models.Model):
     customer = models.ForeignKey('CustomerVendor', on_delete=models.CASCADE, related_name='ar_invoices', limit_choices_to={'entity_type': 'customer'})
     sales_employee = models.ForeignKey('SalesEmployee', on_delete=models.SET_NULL, null=True, related_name='ar_invoices')
     sales_order = models.OneToOneField('SalesOrder', on_delete=models.SET_NULL, null=True, blank=True, related_name='invoice')
-    invoice_date = models.DateField(default=timezone.now, db_index=True) 
+    invoice_date = models.DateField(default=timezone.now, db_index=True)
     due_date = models.DateTimeField(default=timezone.now,db_index=True)
     total_amount = models.DecimalField(max_digits=10, decimal_places=2, default=Decimal('0.00'))
+    discount = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), help_text="Discount amount to be subtracted from subtotal")
+    shipping = models.DecimalField(max_digits=12, decimal_places=2, default=Decimal('0.00'), help_text="Shipping amount to be added to subtotal after discount")
     payment_status = models.CharField(max_length=1, choices=PAYMENT_STATUS_CHOICES, default='P', db_index=True)
+    notes = models.TextField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='ar_invoices')
@@ -484,9 +484,12 @@ class ARInvoice(models.Model):
         return f"ARInvoice #{self.id} - {self.customer.name}"
 
     def save(self, *args, **kwargs):
-        if not self.pk:
+        is_new = self.pk is None
+        if is_new:
             super().save(*args, **kwargs)
-        self.total_amount = self.invoice_items.aggregate(total=models.Sum('total_amount'))['total'] or Decimal('0.00')
+            return
+        subtotal = self.invoice_items.aggregate(total=models.Sum('total_amount'))['total'] or Decimal('0.00')
+        self.total_amount = subtotal - self.discount + self.shipping
         super().save(*args, **kwargs)
 
     class Meta:

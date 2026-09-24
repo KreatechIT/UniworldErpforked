@@ -373,11 +373,17 @@ class SalesOrderItemForm(forms.ModelForm):
 class ARInvoiceForm(BaseStyleForm):
     class Meta:
         model = ARInvoice
-        fields = ['customer', 'sales_employee', 'sales_order','payment_status']
+        fields = ['customer', 'sales_employee', 'sales_order']
 
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['customer'].queryset = CustomerVendor.objects.filter(entity_type='customer')
+
+
+class ARInvoiceNotesForm(BaseStyleForm):
+    class Meta:
+        model = ARInvoice
+        fields = ['notes']
 
 class ARInvoiceItemForm(BaseOrderItemForm):
     class Meta:

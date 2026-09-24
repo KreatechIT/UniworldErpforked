@@ -1,13 +1,16 @@
+from datetime import date, timedelta
 from decimal import Decimal
 from io import StringIO
 
 from django.contrib.auth.models import Permission, User
+from django.core.exceptions import ValidationError
 from django.core.management import call_command
 from django.test import TestCase
 from django.urls import reverse
 
 from uniworlderp.forms import CustomerVendorForm, SalesOrderForm
-from uniworlderp.models import CustomerVendor, Product, SalesEmployee, SalesOrder, SalesOrderItem
+from uniworlderp.models import ARInvoice, CustomerVendor, Product, SalesEmployee, SalesOrder, SalesOrderItem
+from uniworlderp.views.sales_order_views import confirm_sales_order
 
 
 class CustomerEmployeeAssignmentBase(TestCase):
@@ -221,15 +224,31 @@ class SalesOrderViewFlowTests(CustomerEmployeeAssignmentBase):
         self.assertContains(resp, 'Alpha Traders')
         self.assertRegex(resp.content.decode(), rf'<option value="{self.emp1.pk}"\s+selected')
 
-    def test_clerk_creates_order_and_stock_moves(self):
+    def test_clerk_creates_draft_order_without_moving_stock(self):
         self.client.force_login(self.clerk)
         resp = self.client.post(self.create_url(), self.order_post_data(self.c1a, self.emp1, quantity=3))
         self.assertEqual(resp.status_code, 302)
         order = SalesOrder.objects.get()
         self.assertEqual((order.customer, order.sales_employee, order.owner), (self.c1a, self.emp1, self.clerk))
         self.assertEqual(order.total_amount, Decimal('300.00'))
+        self.assertEqual(order.status, 'draft')
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock_quantity, 50)
+
+    def test_clerk_creates_and_confirms_order_moves_stock_and_creates_invoice(self):
+        self.client.force_login(self.clerk)
+        data = self.order_post_data(self.c1a, self.emp1, quantity=3)
+        data['action'] = 'confirm'
+        resp = self.client.post(self.create_url(), data)
+        self.assertEqual(resp.status_code, 302)
+        order = SalesOrder.objects.get()
+        self.assertEqual(order.status, 'confirmed')
         self.product.refresh_from_db()
         self.assertEqual(self.product.stock_quantity, 47)
+        invoice = order.invoice
+        self.assertEqual(invoice.total_amount, Decimal('300.00'))
+        self.assertEqual(invoice.customer, self.c1a)
+        self.assertEqual(invoice.sales_employee, self.emp1)
 
     def test_clerk_mismatch_creates_nothing(self):
         self.client.force_login(self.clerk)
@@ -437,3 +456,145 @@ class SalesEmployeeInlineCustomerManagementTests(CustomerEmployeeAssignmentBase)
         self.assertContains(resp, 'Alpha Traders')
         self.assertNotContains(resp, 'Add Customer')
         self.assertNotContains(resp, 'id="addCustomerModal"')
+
+
+class AutoInvoiceOnConfirmTests(CustomerEmployeeAssignmentBase):
+
+    def make_draft_order(self, quantity=2, unit_price=Decimal('100.00'), discount=Decimal('0'), shipping=Decimal('0')):
+        order = SalesOrder.objects.create(
+            customer=self.c1a, sales_employee=self.emp1, owner=self.admin,
+            discount=discount, shipping=shipping,
+        )
+        SalesOrderItem.objects.create(
+            sales_order=order, product=self.product, unit_price=unit_price, quantity=quantity,
+        )
+        return order
+
+    def test_confirm_creates_invoice_with_matching_total(self):
+        order = self.make_draft_order(quantity=3, discount=Decimal('10'), shipping=Decimal('20'))
+        confirm_sales_order(order)
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, 'confirmed')
+        self.assertEqual(ARInvoice.objects.count(), 1)
+
+        invoice = order.invoice
+        self.assertEqual(invoice.customer, order.customer)
+        self.assertEqual(invoice.sales_employee, order.sales_employee)
+        self.assertEqual(invoice.discount, Decimal('10'))
+        self.assertEqual(invoice.shipping, Decimal('20'))
+        self.assertEqual(invoice.total_amount, order.total_amount)
+        self.assertEqual(invoice.invoice_items.count(), 1)
+        self.assertEqual(invoice.due_date.date(), order.order_date + timedelta(days=30))
+
+    def test_confirm_invoice_date_is_a_plain_date_not_a_timestamp(self):
+        order = self.make_draft_order()
+        confirm_sales_order(order)
+
+        invoice = ARInvoice.objects.get(sales_order=order)
+        self.assertEqual(type(invoice.invoice_date), date)
+        self.assertEqual(invoice.invoice_date.isoformat(), invoice.invoice_date.isoformat()[:10])
+
+    def test_confirm_blocked_by_insufficient_stock_creates_no_invoice(self):
+        order = self.make_draft_order(quantity=1000)
+        with self.assertRaises(ValidationError):
+            confirm_sales_order(order)
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, 'draft')
+        self.assertEqual(ARInvoice.objects.count(), 0)
+
+    def test_confirm_is_idempotent_about_invoice_creation(self):
+        order = self.make_draft_order()
+        confirm_sales_order(order)
+        first_invoice_id = order.invoice.pk
+
+        from uniworlderp.views.sales_order_views import create_invoice_from_order
+        create_invoice_from_order(order)
+        self.assertEqual(ARInvoice.objects.count(), 1)
+        order.refresh_from_db()
+        self.assertEqual(order.invoice.pk, first_invoice_id)
+
+    def test_cancel_confirmed_order_removes_invoice_and_returns_stock(self):
+        order = self.make_draft_order(quantity=4)
+        confirm_sales_order(order)
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock_quantity, 46)
+        self.assertTrue(ARInvoice.objects.filter(sales_order=order).exists())
+
+        self.client.force_login(self.admin)
+        resp = self.client.post(reverse('customer_vendor:sales_order_cancel', args=[order.pk]))
+        self.assertEqual(resp.status_code, 302)
+
+        order.refresh_from_db()
+        self.assertEqual(order.status, 'cancelled')
+        self.assertFalse(ARInvoice.objects.filter(sales_order=order).exists())
+        self.product.refresh_from_db()
+        self.assertEqual(self.product.stock_quantity, 50)
+
+    def test_invoice_list_hides_edit_delete_for_invoice_from_order(self):
+        order = self.make_draft_order()
+        confirm_sales_order(order)
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:invoice_list'))
+        self.assertNotContains(resp, reverse('customer_vendor:invoice_update', args=[order.invoice.pk]))
+        self.assertNotContains(resp, reverse('customer_vendor:invoice_delete', args=[order.invoice.pk]))
+
+    def test_invoice_notes_can_be_saved_on_locked_invoice(self):
+        order = self.make_draft_order()
+        confirm_sales_order(order)
+        self.client.force_login(self.admin)
+        resp = self.client.post(
+            reverse('customer_vendor:invoice_update_notes', args=[order.invoice.pk]),
+            {'notes': 'Customer asked for delivery on Friday.'},
+        )
+        self.assertRedirects(resp, reverse('customer_vendor:invoice_view', args=[order.invoice.pk]))
+        order.invoice.refresh_from_db()
+        self.assertEqual(order.invoice.notes, 'Customer asked for delivery on Friday.')
+
+    def test_invoice_list_status_badge_uses_model_choice_codes(self):
+        order = self.make_draft_order()
+        confirm_sales_order(order)
+        self.assertEqual(order.invoice.payment_status, 'P')
+
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:invoice_list'))
+        self.assertContains(resp, 'Pending')
+        self.assertRegex(resp.content.decode(), r'bg-red-800 text-red-100\s*">\s*Pending')
+
+        order.invoice.payment_status = 'C'
+        order.invoice.save(update_fields=['payment_status'])
+        resp = self.client.get(reverse('customer_vendor:invoice_list'))
+        self.assertRegex(resp.content.decode(), r'bg-green-800 text-green-100\s*">\s*Completed')
+
+    def test_invoice_list_filters_by_customer_employee_status_and_date(self):
+        order1 = self.make_draft_order()
+        confirm_sales_order(order1)
+
+        order2 = SalesOrder.objects.create(customer=self.c2, sales_employee=self.emp2, owner=self.admin)
+        SalesOrderItem.objects.create(sales_order=order2, product=self.product, unit_price=Decimal('50.00'), quantity=1)
+        confirm_sales_order(order2)
+
+        self.client.force_login(self.admin)
+        url = reverse('customer_vendor:invoice_list')
+
+        resp = self.client.get(url, {'customer': self.c1a.pk})
+        self.assertEqual(set(resp.context['invoices']), {order1.invoice})
+
+        resp = self.client.get(url, {'sales_employee': self.emp2.pk})
+        self.assertEqual(set(resp.context['invoices']), {order2.invoice})
+
+        resp = self.client.get(url, {'payment_status': 'P'})
+        self.assertEqual(set(resp.context['invoices']), {order1.invoice, order2.invoice})
+
+        resp = self.client.get(url, {'payment_status': 'C'})
+        self.assertEqual(set(resp.context['invoices']), set())
+
+        today = ARInvoice.objects.get(sales_order=order1).invoice_date
+        resp = self.client.get(url, {'start_date': today.isoformat(), 'end_date': today.isoformat()})
+        self.assertEqual(set(resp.context['invoices']), {order1.invoice, order2.invoice})
+
+        resp = self.client.get(url)
+        self.assertContains(resp, 'All Payment Statuses')
+        self.assertContains(resp, 'All Customers')
+        self.assertContains(resp, 'All Sales Employees')

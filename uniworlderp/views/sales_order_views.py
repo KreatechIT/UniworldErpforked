@@ -7,7 +7,7 @@ from django.utils.http import url_has_allowed_host_and_scheme
 
 from uniworlderp import models
 from .common_imports import *
-from uniworlderp.models import ReturnSales, ReturnSalesItem, SalesOrder, SalesOrderItem, Product,StockTransaction,SalesEmployee,CustomerVendor
+from uniworlderp.models import ReturnSales, ReturnSalesItem, SalesOrder, SalesOrderItem, Product,StockTransaction,SalesEmployee,CustomerVendor, ARInvoice, ARInvoiceItem
 from uniworlderp.forms import ReturnSalesForm, ReturnSalesItemFormSet, SalesOrderForm, SalesOrderItemFormSet, get_return_sales_item_formset
 from company.models import Company, Branch, ContactPerson
 
@@ -20,10 +20,6 @@ def _safe_redirect_back(request, fallback_url):
 
 
 def get_stock_shortages(order):
-    """Checks a sales order's items against real stock. Returns a list of
-    human-readable shortage strings, empty if everything fits. Used to block
-    confirming an order that asks for more than is actually in stock - a
-    draft is allowed to overstock, but confirming is not."""
     needed = {}
     for item in order.order_items.select_related('product'):
         needed[item.product_id] = needed.get(item.product_id, 0) + item.quantity
@@ -40,10 +36,6 @@ def get_stock_shortages(order):
 
 @transaction.atomic
 def confirm_sales_order(order):
-    """The single place a sales order's stock actually moves. Draft items never
-    touch stock (see SalesOrderItem in models.py), so this checks real demand
-    against real stock, creates the OUT transactions, and locks the order.
-    Raises ValidationError (with a readable message) if anything's short."""
     shortages = get_stock_shortages(order)
     if shortages:
         raise ValidationError("Can't confirm - not enough stock: " + "; ".join(shortages))
@@ -59,6 +51,40 @@ def confirm_sales_order(order):
 
     order.status = 'confirmed'
     order.save(update_fields=['status'])
+
+    create_invoice_from_order(order)
+
+
+def create_invoice_from_order(order):
+    if ARInvoice.objects.filter(sales_order=order).exists():
+        return
+
+    order_date = order.order_date
+    if hasattr(order_date, 'date'):
+        order_date = order_date.date()
+
+    invoice = ARInvoice.objects.create(
+        customer=order.customer,
+        sales_employee=order.sales_employee,
+        sales_order=order,
+        invoice_date=order_date,
+        due_date=order_date + timedelta(days=30),
+        discount=order.discount,
+        shipping=order.shipping,
+        owner=order.owner,
+    )
+
+    for item in order.order_items.all():
+        effective_unit_price = (item.total / item.quantity) if item.quantity else item.unit_price
+        ARInvoiceItem.objects.create(
+            ar_invoice=invoice,
+            product=item.product,
+            unit_price=effective_unit_price,
+            quantity=item.quantity,
+        )
+
+    invoice.save()
+    return invoice
 
 class SalesOrderListView(ListView):
     model = SalesOrder
@@ -274,98 +300,20 @@ class SalesOrderUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateVi
 
     @transaction.atomic
     def form_valid(self, form):
-        print("\n" + "="*80)
-        print("SALES ORDER UPDATE - STARTING")
-        print("="*80)
-        
-        print("\nPOST Data Summary:")
-        for key, value in self.request.POST.items():
-            if key.startswith('order_items-'):
-                print(f"  {key}: {value}")
-        
         context = self.get_context_data()
         formset = context['formset']
-        
+
         if formset.is_valid():
             self.object = form.save()
-            print(f"\n✓ Sales Order #{self.object.id} saved")
-            print(f"  Customer: {self.object.customer.name}")
-            print(f"  Order Date: {self.object.order_date}")
-            print(f"  Discount: {self.object.discount}")
-            print(f"  Shipping: {self.object.shipping}")
-            
             formset.instance = self.object
-            
-            print("\n" + "-"*80)
-            print("PROCESSING FORMSET")
-            print("-"*80)
             items = formset.save(commit=False)
-            
-            print(f"\nFormset Analysis:")
-            print(f"  - New/Modified items to save: {len(items)}")
-            print(f"  - Items marked for deletion: {len(formset.deleted_objects)}")
-            
-            current_items = list(self.object.order_items.all().values_list('id', 'product__name', 'quantity'))
-            print(f"\nCurrent items in database BEFORE changes:")
-            for item_id, product_name, qty in current_items:
-                print(f"  - ID {item_id}: {product_name} x {qty}")
-            
-            if formset.deleted_objects:
-                print("\n" + "-"*80)
-                print("DELETING ITEMS")
-                print("-"*80)
-                for item in formset.deleted_objects:
-                    if item.pk:
-                        print(f"\n🗑️  Deleting Item ID: {item.pk}")
-                        print(f"   Product: {item.product.name}")
-                        print(f"   Quantity being returned: {item.quantity}")
-                        print(f"   Stock before deletion: {item.product.stock_quantity}")
-                        
-                        item.delete()
-                        
-                        item.product.refresh_from_db()
-                        print(f"   Stock after deletion: {item.product.stock_quantity}")
-                        print(f"   ✓ Item deleted and stock returned")
-            
-            if items:
-                print("\n" + "-"*80)
-                print("SAVING NEW/MODIFIED ITEMS")
-                print("-"*80)
-                for item in items:
-                    is_new = item.pk is None
-                    
-                    if is_new:
-                        print(f"\n➕ Adding NEW Item")
-                        print(f"   Product: {item.product.name}")
-                        print(f"   Quantity: {item.quantity}")
-                        print(f"   Unit Price: {item.unit_price}")
-                        print(f"   Stock before adding: {item.product.stock_quantity}")
-                    else:
-                        from uniworlderp.models import SalesOrderItem
-                        old_item = SalesOrderItem.objects.get(pk=item.pk)
-                        quantity_diff = item.quantity - old_item.quantity
-                        
-                        print(f"\n✏️  Modifying EXISTING Item ID: {item.pk}")
-                        print(f"   Product: {item.product.name}")
-                        print(f"   Old Quantity: {old_item.quantity}")
-                        print(f"   New Quantity: {item.quantity}")
-                        print(f"   Quantity Change: {quantity_diff:+d}")
-                        print(f"   Stock before modification: {item.product.stock_quantity}")
-                    
-                    item.save()
-                    
-                    item.product.refresh_from_db()
-                    print(f"   Stock after save: {item.product.stock_quantity}")
-                    print(f"   ✓ Item saved successfully")
-            
-            final_items = list(self.object.order_items.all().values_list('id', 'product__name', 'quantity'))
-            print(f"\nFinal items in database AFTER changes:")
-            for item_id, product_name, qty in final_items:
-                print(f"  - ID {item_id}: {product_name} x {qty}")
-            
-            print("\n" + "="*80)
-            print("SALES ORDER UPDATE - COMPLETED SUCCESSFULLY")
-            print("="*80 + "\n")
+
+            for item in formset.deleted_objects:
+                if item.pk:
+                    item.delete()
+
+            for item in items:
+                item.save()
 
             if self.request.POST.get('action') == 'confirm':
                 try:
@@ -379,8 +327,6 @@ class SalesOrderUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateVi
 
             return super().form_valid(form)
         else:
-            print("\n❌ FORMSET VALIDATION FAILED")
-            print(f"Formset errors: {formset.errors}")
             return self.form_invalid(form)
 
     def get_common_context(self):
@@ -483,9 +429,6 @@ class SalesOrderDeleteView(LoginRequiredMixin, PermissionRequiredMixin, DeleteVi
 
 @method_decorator(require_POST, name='dispatch')
 class SalesOrderCancelView(LoginRequiredMixin, PermissionRequiredMixin, View):
-    """Undoes an accidental confirm: returns the order's stock and marks it
-    Cancelled. The order itself is never deleted, so the record (and any
-    invoice number tied to it later) stays intact for the audit trail."""
     permission_required = 'uniworlderp.change_salesorder'
 
     def handle_no_permission(self):
@@ -509,15 +452,17 @@ class SalesOrderCancelView(LoginRequiredMixin, PermissionRequiredMixin, View):
                 owner=order.owner,
             )
 
+        invoice = getattr(order, 'invoice', None)
+        if invoice is not None:
+            invoice.delete()
+
         order.status = 'cancelled'
         order.save(update_fields=['status'])
-        messages.success(request, f"Sales Order #{order.id} has been cancelled and its stock returned.")
+        messages.success(request, f"Sales Order #{order.id} has been cancelled, its stock returned, and its invoice removed.")
         return _safe_redirect_back(request, fallback)
 
 @method_decorator(require_POST, name='dispatch')
 class SalesOrderConfirmView(LoginRequiredMixin, PermissionRequiredMixin, View):
-    """Confirms a draft straight from the view page, without reopening the
-    full edit form - same stock check and lock as confirming from the form."""
     permission_required = 'uniworlderp.change_salesorder'
 
     def handle_no_permission(self):

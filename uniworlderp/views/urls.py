@@ -52,6 +52,7 @@ urlpatterns = [
     path('invoices/update/<int:pk>/', invoice_views.ARInvoiceUpdateView.as_view(), name='invoice_update'),
     path('invoices/view/<int:pk>/', invoice_views.ARInvoiceDetailView.as_view(), name='invoice_view'),
     path('invoices/delete/<int:pk>/', invoice_views.ARInvoiceDeleteView.as_view(), name='invoice_delete'),
+    path('invoices/notes/<int:pk>/', invoice_views.ARInvoiceNotesUpdateView.as_view(), name='invoice_update_notes'),
     path('invoices/print/<int:pk>/', invoice_views.ARInvoicePrintView.as_view(), name='invoice_print'),
     path('invoices/search/', invoice_views.ARInvoiceSearchView.as_view(), name='invoice_search'),   
 

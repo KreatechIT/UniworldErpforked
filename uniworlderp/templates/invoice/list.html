@@ -6,20 +6,45 @@
 
 <div class="bg-[hsl(var(--background))] rounded-lg shadow-lg overflow-hidden border border-[hsl(var(--border))]">
     <div class="p-6">
-        <div class="flex flex-col sm:flex-row justify-between items-center mb-4 space-y-4 sm:space-y-0 sm:space-x-4">
+        <div class="flex flex-col lg:flex-row lg:flex-wrap justify-between items-start lg:items-center mb-4 gap-4">
             <!-- Add New Invoice Button -->
             <div class="flex items-center space-x-2 sm:space-x-4">
                 <a href="{% url 'customer_vendor:invoice_create' %}" class="w-full sm:w-auto px-6 py-3 bg-gradient-to-br from-[#a31319] to-black text-white rounded-full hover:bg-opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[hsl(var(--ring))] text-lg">
                     <i class="ri-add-line mr-1"></i> Add New Invoice
                 </a>
             </div>
-        
-            <!-- Search Form -->
-            <form method="get" action="{% url 'customer_vendor:invoice_list' %}" class="relative w-full sm:w-auto">
-                <input type="text" name="search" placeholder="Search invoices..." class="pl-10 pr-4 py-2 border border-[hsl(var(--border))] rounded-md focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:w-72 sm:text-sm bg-[hsl(var(--background))]" value="{{ request.GET.search }}">
-                <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
-                    <i class="ri-search-line text-[hsl(var(--muted-foreground))]"></i>
+
+            <!-- Search + Filter Form -->
+            <form method="get" action="{% url 'customer_vendor:invoice_list' %}" class="flex flex-wrap items-center gap-2 w-full sm:w-auto mt-4 sm:mt-0">
+                <div class="relative w-full sm:w-auto">
+                    <input type="text" name="search" placeholder="Search invoices..." class="pl-10 pr-4 py-2 border border-[hsl(var(--border))] rounded-md focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:w-56 sm:text-sm bg-[hsl(var(--background))]" value="{{ request.GET.search }}">
+                    <div class="absolute inset-y-0 left-0 pl-3 flex items-center pointer-events-none">
+                        <i class="ri-search-line text-[hsl(var(--muted-foreground))]"></i>
+                    </div>
                 </div>
+                <select name="payment_status" onchange="this.form.submit()" class="form-input py-3 w-full sm:w-auto bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm">
+                    <option value="">All Payment Statuses</option>
+                    {% for value, label in payment_status_choices %}
+                        <option value="{{ value }}" {% if selected_payment_status == value %}selected{% endif %}>{{ label }}</option>
+                    {% endfor %}
+                </select>
+                <select name="customer" onchange="this.form.submit()" class="form-input py-3 w-full sm:w-auto bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm">
+                    <option value="">All Customers</option>
+                    {% for customer in customers %}
+                        <option value="{{ customer.id }}" {% if selected_customer == customer.id|stringformat:"s" %}selected{% endif %}>{{ customer.name }}</option>
+                    {% endfor %}
+                </select>
+                <select name="sales_employee" onchange="this.form.submit()" class="form-input py-3 w-full sm:w-auto bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm">
+                    <option value="">All Sales Employees</option>
+                    {% for employee in sales_employees %}
+                        <option value="{{ employee.id }}" {% if selected_sales_employee == employee.id|stringformat:"s" %}selected{% endif %}>{{ employee.full_name }}</option>
+                    {% endfor %}
+                </select>
+                {% include "includes/date_range_filter.html" with wrapper_id="invoiceDateRange" start_value=request.GET.start_date end_value=request.GET.end_date %}
+                <button type="submit" class="px-4 py-3 bg-gray-700 text-white rounded-md hover:bg-gray-600 text-sm">Filter</button>
+                {% if request.GET.search or selected_payment_status or selected_customer or selected_sales_employee or request.GET.start_date or request.GET.end_date %}
+                    <a href="{% url 'customer_vendor:invoice_list' %}" class="px-4 py-3 bg-gray-500 text-white rounded-md hover:bg-gray-400 text-sm whitespace-nowrap">Clear</a>
+                {% endif %}
             </form>
         </div>
         
@@ -57,11 +82,9 @@
                                     <td class="px-6 py-4 whitespace-nowrap">{{ invoice.due_date|date:"Y-m-d" }}</td>
                                     <td class="px-6 py-4 whitespace-nowrap">${{ invoice.total_amount|floatformat:2 }}</td>
                                     <td class="px-6 py-4 whitespace-nowrap">
-                                        <span class="px-2 py-1 text-xs font-semibold rounded-full 
-                                            {% if invoice.payment_status == 'paid' %}
+                                        <span class="px-2 py-1 text-xs font-semibold rounded-full
+                                            {% if invoice.payment_status == 'C' %}
                                                 bg-green-800 text-green-100
-                                            {% elif invoice.payment_status == 'partial' %}
-                                                bg-yellow-800 text-yellow-100
                                             {% else %}
                                                 bg-red-800 text-red-100
                                             {% endif %}">
@@ -70,19 +93,21 @@
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap">
                                         <div class="flex space-x-2">
+                                            {% if not invoice.sales_order_id %}
                                             {% if perms.uniworlderp.change_arinvoice %}
-                                            <a href="{% url 'customer_vendor:invoice_update' invoice.pk %}" 
+                                            <a href="{% url 'customer_vendor:invoice_update' invoice.pk %}"
                                                class="px-2 py-1 text-xs font-semibold rounded-full bg-indigo-800 text-indigo-100 hover:bg-indigo-700">
                                                 <i class="ri-edit-line mr-1"></i>Edit
                                             </a>
                                             {% endif %}
                                             {% if perms.uniworlderp.delete_arinvoice %}
-                                            <a href="{% url 'customer_vendor:invoice_delete' invoice.pk %}" 
+                                            <a href="{% url 'customer_vendor:invoice_delete' invoice.pk %}"
                                                class="px-2 py-1 text-xs font-semibold rounded-full bg-red-800 text-red-100 hover:bg-red-700">
                                                 <i class="ri-delete-bin-line mr-1"></i>Delete
                                             </a>
                                             {% endif %}
-                                            <a href="{% url 'customer_vendor:invoice_view' invoice.pk %}" 
+                                            {% endif %}
+                                            <a href="{% url 'customer_vendor:invoice_view' invoice.pk %}"
                                                class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-800 text-blue-100 hover:bg-blue-700">
                                                 <i class="ri-eye-line mr-1"></i>View
                                             </a>
