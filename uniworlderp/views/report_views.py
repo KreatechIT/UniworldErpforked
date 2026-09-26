@@ -166,6 +166,11 @@ class ReportView(LoginRequiredMixin, View):
                         'product_summary': [],
                         'sales_employee_summary': [],
                         'date_summary': [],
+                        'start_date': start_date,
+                        'end_date': end_date,
+                        'selected_customer_id': customer_id,
+                        'selected_product_id': product_id,
+                        'selected_sales_employee_id': sales_employee_id,
                         'error': error_message
                     })
             except (ValueError, TypeError):
@@ -178,6 +183,11 @@ class ReportView(LoginRequiredMixin, View):
                     'product_summary': [],
                     'sales_employee_summary': [],
                     'date_summary': [],
+                    'start_date': start_date,
+                    'end_date': end_date,
+                    'selected_customer_id': customer_id,
+                    'selected_product_id': product_id,
+                    'selected_sales_employee_id': sales_employee_id,
                     'error': error_message
                 })
 
@@ -384,6 +394,9 @@ class ReportView(LoginRequiredMixin, View):
             'date_summary': date_summary,
             'start_date': start_date,
             'end_date': end_date,
+            'selected_customer_id': customer_id,
+            'selected_product_id': product_id,
+            'selected_sales_employee_id': sales_employee_id,
             'gross_qty': gross_qty,
             'returned_qty': returned_qty,
             'net_qty': net_qty,
