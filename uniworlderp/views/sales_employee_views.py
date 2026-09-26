@@ -36,7 +36,7 @@ class SalesEmployeeListView(ListView):
 
     def get_queryset(self):
         search_query = self.request.GET.get('search', '')
-        queryset = SalesEmployee.objects.all()
+        queryset = SalesEmployee.objects.order_by('full_name')
 
         if search_query:
             queryset = queryset.filter(

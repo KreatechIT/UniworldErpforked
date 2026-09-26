@@ -7,7 +7,14 @@
 <div class="bg-[hsl(var(--background))] rounded-lg shadow-lg overflow-hidden border border-[hsl(var(--border))]">
     <div class="p-6">
         <div class="flex flex-col lg:flex-row lg:flex-wrap justify-between items-start lg:items-center mb-4 gap-4">
-            <h2 class="text-2xl font-bold">Payments</h2>
+            <div class="flex items-center gap-3">
+                <h2 class="text-2xl font-bold">Payments</h2>
+                {% if perms.uniworlderp.add_payment %}
+                <button type="button" id="openQuickAddPaymentModal" class="inline-flex items-center justify-center px-4 py-2 bg-gradient-to-br from-[#a31319] to-black text-white rounded-md hover:bg-opacity-90 text-sm">
+                    <i class="ri-add-line mr-1"></i> Add Payment
+                </button>
+                {% endif %}
+            </div>
 
             <form method="get" action="{% url 'customer_vendor:payment_list' %}" class="flex flex-wrap items-center gap-2 w-full sm:w-auto mt-4 sm:mt-0">
                 <div class="relative w-full sm:w-auto">
@@ -34,7 +41,12 @@
                         <option value="{{ method.id }}" {% if selected_method == method.id|stringformat:"s" %}selected{% endif %}>{{ method.name }}</option>
                     {% endfor %}
                 </select>
-                <input type="text" name="received_by" placeholder="Received by..." class="form-input py-3 w-full sm:w-40 bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm" value="{{ selected_received_by }}">
+                <select name="received_by" onchange="this.form.submit()" class="form-input py-3 w-full sm:w-40 bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm">
+                    <option value="">All Received By</option>
+                    {% for name in received_by_options %}
+                        <option value="{{ name }}" {% if selected_received_by == name %}selected{% endif %}>{{ name }}</option>
+                    {% endfor %}
+                </select>
                 {% include "includes/date_range_filter.html" with wrapper_id="paymentDateRange" start_value=request.GET.start_date end_value=request.GET.end_date %}
                 <button type="submit" class="px-4 py-3 bg-gray-700 text-white rounded-md hover:bg-gray-600 text-sm">Filter</button>
                 {% if request.GET.search or selected_customer or selected_sales_employee or selected_method or selected_received_by or request.GET.start_date or request.GET.end_date %}
@@ -50,35 +62,28 @@
             </div>
             <div class="p-4 rounded-lg bg-[hsl(var(--muted))]">
                 <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">Payments (filtered)</div>
-                <div class="text-xl font-semibold">{{ paginator.count }}</div>
+                <div class="text-xl font-semibold">{{ payment_count }}</div>
             </div>
-        </div>
-
-        {% if daily_totals %}
-        <div class="mb-6">
-            <h3 class="text-sm font-semibold mb-2">Collected by Date</h3>
-            <div class="overflow-x-auto">
-                <table class="w-full text-sm text-left border border-[hsl(var(--border))] rounded-md overflow-hidden">
-                    <thead class="text-xs uppercase bg-[hsl(var(--muted))]">
-                        <tr>
-                            <th class="px-4 py-2">Date</th>
-                            <th class="px-4 py-2">Payments</th>
-                            <th class="px-4 py-2">Collected</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                        {% for day in daily_totals %}
-                        <tr class="border-t border-[hsl(var(--border))]">
-                            <td class="px-4 py-2 whitespace-nowrap">{{ day.payment_date|date:"Y-m-d" }}</td>
-                            <td class="px-4 py-2">{{ day.count }}</td>
-                            <td class="px-4 py-2 font-semibold text-green-600">{{ day.total|floatformat:2 }}</td>
-                        </tr>
-                        {% endfor %}
-                    </tbody>
-                </table>
+            <div class="p-4 rounded-lg bg-[hsl(var(--muted))]">
+                <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">Average Payment</div>
+                <div class="text-xl font-semibold">{{ average_amount|floatformat:2 }}</div>
             </div>
+            <div class="p-4 rounded-lg bg-[hsl(var(--muted))]">
+                <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">Customers Paid</div>
+                <div class="text-xl font-semibold">{{ unique_customers }}</div>
+            </div>
+            <div class="p-4 rounded-lg bg-[hsl(var(--muted))]">
+                <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">Invoices Touched</div>
+                <div class="text-xl font-semibold">{{ unique_invoices }}</div>
+            </div>
+            {% for m in method_breakdown %}
+            <div class="p-4 rounded-lg bg-[hsl(var(--muted))]">
+                <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">{{ m.method__name|default:"Unknown" }}</div>
+                <div class="text-xl font-semibold">{{ m.total|floatformat:2 }}</div>
+                <div class="text-xs text-[hsl(var(--muted-foreground))]">{{ m.count }} payment{{ m.count|pluralize }}</div>
+            </div>
+            {% endfor %}
         </div>
-        {% endif %}
 
         <div class="overflow-x-auto table-container">
             <div class="bg-gradient-to-br from-[#a31319] to-black rounded-lg shadow-lg overflow-hidden">
@@ -100,7 +105,7 @@
                             </thead>
                             <tbody>
                                 {% for payment in payments %}
-                                <tr class="border-b border-gray-700 hover:bg-[#5a1114] transition-colors">
+                                <tr class="payment-row cursor-pointer {% cycle 'bg-black/20' 'bg-black/0' %} border-b border-white/10 hover:bg-[#5a1114] transition-colors" data-payment-id="{{ payment.id }}">
                                     <td class="px-6 py-4 whitespace-nowrap">{{ payment.payment_date|date:"Y-m-d" }}</td>
                                     <td class="px-6 py-4 whitespace-nowrap font-medium">{{ payment.id }}</td>
                                     <td class="px-6 py-4 whitespace-nowrap">{{ payment.customer.name }}</td>
@@ -108,10 +113,10 @@
                                         #{{ payment.invoice.id }}{% if payment.invoice.sales_order %} / SO-{{ payment.invoice.sales_order.id }}{% endif %}
                                     </td>
                                     <td class="px-6 py-4 whitespace-nowrap">{{ payment.method.name }}</td>
-                                    <td class="px-6 py-4 whitespace-nowrap">{{ payment.amount|floatformat:2 }}</td>
+                                    <td class="px-6 py-4 whitespace-nowrap font-semibold text-green-300">{{ payment.amount|floatformat:2 }}</td>
                                     <td class="px-6 py-4 whitespace-nowrap">{{ payment.received_by|default:"-" }}</td>
                                     <td class="px-6 py-4">{{ payment.notes|default:"-" }}</td>
-                                    <td class="px-6 py-4 whitespace-nowrap">
+                                    <td class="px-6 py-4 whitespace-nowrap" onclick="event.stopPropagation();">
                                         <div class="flex space-x-2">
                                             <a href="{% url 'customer_vendor:invoice_view' payment.invoice.pk %}"
                                                class="px-2 py-1 text-xs font-semibold rounded-full bg-blue-800 text-blue-100 hover:bg-blue-700">
@@ -138,4 +143,193 @@
         </div>
     </div>
 </div>
+
+{% if quick_payment_form %}
+<div id="quickAddPaymentModal" class="hidden fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black bg-opacity-50 p-4 overflow-y-auto">
+    <div class="bg-[hsl(var(--background))] rounded-lg shadow-xl w-full max-w-lg max-h-[85vh] flex flex-col">
+        <div class="flex items-center justify-between p-4 border-b border-[hsl(var(--border))]">
+            <h3 class="text-lg font-semibold">Add Payment</h3>
+            <button type="button" id="closeQuickAddPaymentModal" class="text-xl leading-none">&times;</button>
+        </div>
+        <form method="post" action="{% url 'customer_vendor:payment_quick_create' %}" class="flex flex-col overflow-hidden flex-1">
+            {% csrf_token %}
+            <div class="overflow-y-auto px-4 py-3 flex-1 space-y-3">
+                {% for field in quick_payment_form %}
+                <div class="payment-field" data-field="{{ field.name }}">
+                    <label for="{{ field.id_for_label }}" class="block text-sm font-medium mb-1">
+                        {{ field.label }}{% if field.field.required %}*{% endif %}
+                    </label>
+                    {{ field }}
+                    {% if field.errors %}
+                    <div class="text-red-600 text-sm mt-1">
+                        {% for error in field.errors %}<p>{{ error }}</p>{% endfor %}
+                    </div>
+                    {% endif %}
+                </div>
+                {% endfor %}
+            </div>
+            <div class="p-4 border-t border-[hsl(var(--border))] flex justify-end gap-2">
+                <button type="button" id="cancelQuickAddPaymentModal" class="px-4 py-2 border border-[hsl(var(--border))] rounded-md">Cancel</button>
+                <button type="submit" class="px-4 py-2 bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] rounded-md">Save Payment</button>
+            </div>
+        </form>
+    </div>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const modal = document.getElementById('quickAddPaymentModal');
+    const openBtn = document.getElementById('openQuickAddPaymentModal');
+    const closeBtn = document.getElementById('closeQuickAddPaymentModal');
+    const cancelBtn = document.getElementById('cancelQuickAddPaymentModal');
+    if (!modal) return;
+
+    const methodField = modal.querySelector('[name="method"]');
+    const receivedByField = modal.querySelector('[name="received_by"]');
+    const fieldsByKind = {
+        cash: ['received_by'],
+        bank: ['bank_name', 'account_number', 'transaction_reference'],
+        cheque: ['cheque_number', 'cheque_date', 'cheque_bank'],
+        mobile: ['mobile_provider', 'mobile_number', 'transaction_id'],
+    };
+    const methodKindByValue = {
+        {% for method in quick_payment_form.fields.method.queryset %}'{{ method.pk }}': '{{ method.kind }}',{% endfor %}
+    };
+
+    function updateReceivedByOther() {
+        const wrapper = modal.querySelector('.payment-field[data-field="received_by_other"]');
+        if (!wrapper) return;
+        const kind = methodKindByValue[methodField.value] || '';
+        const showCashField = kind === 'cash';
+        wrapper.style.display = (showCashField && receivedByField.value === 'other') ? '' : 'none';
+    }
+
+    function updateVisibleFields() {
+        const kind = methodKindByValue[methodField.value] || '';
+        const relevant = fieldsByKind[kind] || [];
+        Object.values(fieldsByKind).flat().forEach(function (name) {
+            const wrapper = modal.querySelector('.payment-field[data-field="' + name + '"]');
+            if (wrapper) wrapper.style.display = relevant.includes(name) ? '' : 'none';
+        });
+        updateReceivedByOther();
+    }
+
+    if (methodField) {
+        methodField.addEventListener('change', updateVisibleFields);
+        updateVisibleFields();
+    }
+    if (receivedByField) {
+        receivedByField.addEventListener('change', updateReceivedByOther);
+    }
+
+    function openModal() { modal.classList.remove('hidden'); }
+    function closeModal() { modal.classList.add('hidden'); }
+    if (openBtn) openBtn.addEventListener('click', openModal);
+    if (closeBtn) closeBtn.addEventListener('click', closeModal);
+    if (cancelBtn) cancelBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+});
+</script>
+{% endif %}
+
+<div id="paymentHistoryModal" class="hidden fixed inset-0 z-50 flex items-start sm:items-center justify-center bg-black bg-opacity-50 p-4 overflow-y-auto">
+    <div class="bg-[hsl(var(--background))] rounded-lg shadow-xl w-full max-w-2xl max-h-[85vh] flex flex-col">
+        <div class="flex items-center justify-between p-4 border-b border-[hsl(var(--border))]">
+            <div>
+                <h3 class="text-lg font-semibold">Payment History — Invoice <span id="phInvoiceId"></span></h3>
+                <p class="text-sm text-[hsl(var(--muted-foreground))]"><span id="phCustomer"></span></p>
+            </div>
+            <button type="button" id="closePaymentHistoryModal" class="text-xl leading-none">&times;</button>
+        </div>
+        <div class="p-4 border-b border-[hsl(var(--border))] flex flex-wrap gap-4">
+            <div>
+                <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">Total</div>
+                <div class="font-semibold" id="phTotal"></div>
+            </div>
+            <div>
+                <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">Paid</div>
+                <div class="font-semibold text-green-600" id="phPaid"></div>
+            </div>
+            <div>
+                <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">Balance Due</div>
+                <div class="font-semibold text-red-600" id="phBalance"></div>
+            </div>
+            <div class="ml-auto">
+                <a id="phInvoiceLink" href="#" class="px-3 py-1.5 text-xs font-semibold rounded-full bg-blue-100 text-blue-800 hover:bg-blue-200">View Invoice</a>
+            </div>
+        </div>
+        <div class="overflow-y-auto p-4">
+            <ol id="phTimeline" class="relative border-s-2 border-[hsl(var(--border))] ml-3 space-y-6"></ol>
+        </div>
+    </div>
+</div>
+<script>
+document.addEventListener('DOMContentLoaded', function () {
+    const modal = document.getElementById('paymentHistoryModal');
+    const closeBtn = document.getElementById('closePaymentHistoryModal');
+    const invoiceIdEl = document.getElementById('phInvoiceId');
+    const customerEl = document.getElementById('phCustomer');
+    const totalEl = document.getElementById('phTotal');
+    const paidEl = document.getElementById('phPaid');
+    const balanceEl = document.getElementById('phBalance');
+    const invoiceLinkEl = document.getElementById('phInvoiceLink');
+    const timelineEl = document.getElementById('phTimeline');
+
+    function closeModal() { modal.classList.add('hidden'); }
+    closeBtn.addEventListener('click', closeModal);
+    modal.addEventListener('click', function (e) { if (e.target === modal) closeModal(); });
+
+    function escapeHtml(value) {
+        const div = document.createElement('div');
+        div.textContent = value == null ? '' : String(value);
+        return div.innerHTML;
+    }
+
+    const invoiceHistoryUrlTemplate = '{% url "customer_vendor:payment_invoice_history" 0 %}';
+    document.querySelectorAll('.payment-row').forEach(function (row) {
+        row.addEventListener('click', function () {
+            const paymentId = row.getAttribute('data-payment-id');
+            fetch(invoiceHistoryUrlTemplate.replace('/0/', '/' + paymentId + '/'))
+                .then(function (res) { return res.json(); })
+                .then(function (data) {
+                    invoiceIdEl.textContent = '#' + data.invoice_id;
+                    customerEl.textContent = data.customer;
+                    totalEl.textContent = parseFloat(data.invoice_total).toFixed(2);
+                    paidEl.textContent = parseFloat(data.paid_amount).toFixed(2);
+                    balanceEl.textContent = parseFloat(data.balance_due).toFixed(2);
+                    invoiceLinkEl.href = data.invoice_url;
+
+                    timelineEl.innerHTML = '';
+                    data.payments.forEach(function (p, index) {
+                        const li = document.createElement('li');
+                        li.className = 'ms-4';
+                        const dotClass = p.is_selected
+                            ? 'absolute w-3 h-3 bg-[hsl(var(--primary))] rounded-full -start-[7px] border-2 border-[hsl(var(--background))] ring-2 ring-[hsl(var(--primary))]'
+                            : 'absolute w-3 h-3 bg-[hsl(var(--muted-foreground))] rounded-full -start-[7px] border-2 border-[hsl(var(--background))]';
+                        const positionLabel = index === 0 ? 'First payment' : (index === data.payments.length - 1 ? 'Latest payment' : 'Payment ' + (index + 1));
+                        li.innerHTML = `
+                            <div class="${dotClass}"></div>
+                            <div class="p-3 rounded-md border ${p.is_selected ? 'border-[hsl(var(--primary))] bg-[hsl(var(--muted))]' : 'border-[hsl(var(--border))]'}">
+                                <div class="flex justify-between items-start">
+                                    <div>
+                                        <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">${escapeHtml(positionLabel)}${p.is_selected ? ' &middot; Selected' : ''}</div>
+                                        <div class="font-semibold">${escapeHtml(p.date)} &middot; ${escapeHtml(p.method)}</div>
+                                        <div class="text-sm text-[hsl(var(--muted-foreground))]">Received by: ${escapeHtml(p.received_by) || '-'}</div>
+                                        ${p.notes ? `<div class="text-sm text-[hsl(var(--muted-foreground))] mt-1">${escapeHtml(p.notes)}</div>` : ''}
+                                    </div>
+                                    <div class="text-right">
+                                        <div class="font-semibold text-green-600">${parseFloat(p.amount).toFixed(2)}</div>
+                                        <a href="${p.receipt_url}" target="_blank" class="text-xs text-blue-600 hover:underline">Receipt</a>
+                                    </div>
+                                </div>
+                            </div>
+                        `;
+                        timelineEl.appendChild(li);
+                    });
+
+                    modal.classList.remove('hidden');
+                });
+        });
+    });
+});
+</script>
 {% endblock %}

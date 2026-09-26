@@ -58,8 +58,20 @@
                         {% endfor %}
                     </select>
                 </div>
+                <div>
+                    <label class="block text-xs text-[hsl(var(--muted-foreground))]">Type</label>
+                    <select name="txn_type" onchange="this.form.submit()" class="form-input py-3 w-full sm:w-40 bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm">
+                        <option value="">Invoices &amp; Payments</option>
+                        <option value="invoice" {% if txn_type == 'invoice' %}selected{% endif %}>Invoices only</option>
+                        <option value="payment" {% if txn_type == 'payment' %}selected{% endif %}>Payments only</option>
+                    </select>
+                </div>
+                <div>
+                    <label class="block text-xs text-[hsl(var(--muted-foreground))]">Search Invoice # / SO #</label>
+                    <input type="text" name="search" value="{{ search }}" placeholder="e.g. 42 or SO-42" class="form-input py-3 w-full sm:w-48 bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm">
+                </div>
                 <button type="submit" class="px-4 py-3 bg-gray-700 text-white rounded-md hover:bg-gray-600 text-sm self-end">Apply</button>
-                {% if customer_id or sales_employee_id %}
+                {% if customer_id or sales_employee_id or search or txn_type %}
                     <a href="{% url 'customer_vendor:ledger' %}" class="px-4 py-3 bg-gray-500 text-white rounded-md hover:bg-gray-400 text-sm self-end whitespace-nowrap">Clear</a>
                 {% endif %}
             </div>
@@ -93,8 +105,8 @@
             <div class="mb-4 flex flex-wrap justify-between items-center gap-2">
                 <h3 class="text-lg font-semibold">Statement — {{ selected_customer.name }}</h3>
                 <div class="flex gap-2">
-                    <a href="{% url 'customer_vendor:ledger_print' %}?customer={{ selected_customer.id }}&start_date={{ start_date }}&end_date={{ end_date }}" target="_blank" class="btn-secondary">Print Statement</a>
-                    <a href="{% url 'customer_vendor:ledger_excel' %}?customer={{ selected_customer.id }}&start_date={{ start_date }}&end_date={{ end_date }}" class="btn-secondary">Export to Excel</a>
+                    <a href="{% url 'customer_vendor:ledger_print' %}?customer={{ selected_customer.id }}&start_date={{ start_date }}&end_date={{ end_date }}&search={{ search|urlencode }}&txn_type={{ txn_type }}" target="_blank" class="btn-secondary">Print Statement</a>
+                    <a href="{% url 'customer_vendor:ledger_excel' %}?customer={{ selected_customer.id }}&start_date={{ start_date }}&end_date={{ end_date }}&search={{ search|urlencode }}&txn_type={{ txn_type }}" class="btn-secondary">Export to Excel</a>
                     <button type="button" class="export-button btn-secondary" data-table-id="ledgerTable">Export as CSV</button>
                 </div>
             </div>

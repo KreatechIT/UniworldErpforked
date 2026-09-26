@@ -428,6 +428,27 @@ class PaymentForm(BaseStyleForm):
             return self.data.get('received_by_other', '').strip()
         return value
 
+
+class QuickPaymentForm(PaymentForm):
+    invoice = forms.ModelChoiceField(
+        queryset=ARInvoice.objects.none(),
+        widget=forms.Select(attrs={'class': BASE_FIELD_CLASSES}),
+    )
+
+    class Meta(PaymentForm.Meta):
+        fields = ['invoice'] + PaymentForm.Meta.fields
+
+    def __init__(self, *args, **kwargs):
+        super().__init__(*args, **kwargs)
+        invoices = ARInvoice.objects.exclude(payment_status='C').select_related('customer').order_by('-invoice_date')
+        self.fields['invoice'].queryset = invoices
+        self.fields['invoice'].label_from_instance = (
+            lambda inv: f"#{inv.id} - {inv.customer.name} - due {inv.balance_due}"
+        )
+        field_order = ['invoice'] + [name for name in self.fields if name != 'invoice']
+        self.order_fields(field_order)
+
+
 class ARInvoiceItemForm(BaseOrderItemForm):
     class Meta:
         model = ARInvoiceItem

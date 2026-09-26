@@ -11,6 +11,8 @@ def get_ledger_filters(request):
     params = request.GET
     customer_id = params.get('customer', '')
     sales_employee_id = params.get('sales_employee', '')
+    search = params.get('search', '').strip()
+    txn_type = params.get('txn_type', '')
     preset = params.get('preset', 'day')
     start_date = params.get('start_date', '')
     end_date = params.get('end_date', '')
@@ -31,13 +33,15 @@ def get_ledger_filters(request):
     return {
         'customer_id': customer_id,
         'sales_employee_id': sales_employee_id,
+        'search': search,
+        'txn_type': txn_type,
         'preset': preset,
         'start_date': start_date,
         'end_date': end_date,
     }
 
 
-def build_customer_ledger(customer, start_date, end_date):
+def build_customer_ledger(customer, start_date, end_date, search='', txn_type=''):
     brought_forward = Decimal('0.00')
 
     invoices_before = ARInvoice.objects.filter(customer=customer)
@@ -62,9 +66,18 @@ def build_customer_ledger(customer, start_date, end_date):
         invoices = invoices.filter(invoice_date__lte=end_date)
         payments = payments.filter(payment_date__lte=end_date)
 
+    search_lower = search.lower()
+
     rows = []
     for inv in invoices:
         ref = f"INV-{inv.id}" + (f" / SO-{inv.sales_order_id}" if inv.sales_order_id else "")
+        matches_search = (
+            not search_lower
+            or search_lower in str(inv.id)
+            or (inv.sales_order_id and search_lower in str(inv.sales_order_id))
+            or search_lower in ref.lower()
+        )
+        matches_type = txn_type in ('', 'invoice')
         rows.append({
             'date': inv.invoice_date,
             'type': 'Invoice',
@@ -75,6 +88,7 @@ def build_customer_ledger(customer, start_date, end_date):
             'link_url_name': 'customer_vendor:invoice_view',
             'link_pk': inv.id,
             'sort_key': (inv.invoice_date, 0, inv.id),
+            'visible': matches_search and matches_type,
         })
 
     for pay in payments:
@@ -82,16 +96,25 @@ def build_customer_ledger(customer, start_date, end_date):
         type_label = f"Payment ({method_label})" if method_label else "Payment"
         if pay.received_by:
             type_label += f", rcvd by {pay.received_by}"
+        ref = f"PAY-{pay.id}"
+        matches_search = (
+            not search_lower
+            or search_lower in str(pay.id)
+            or (pay.invoice_id and search_lower in str(pay.invoice_id))
+            or search_lower in ref.lower()
+        )
+        matches_type = txn_type in ('', 'payment')
         rows.append({
             'date': pay.payment_date,
             'type': type_label,
-            'ref': f"PAY-{pay.id}",
+            'ref': ref,
             'debit': Decimal('0.00'),
             'credit': pay.amount,
             'notes': pay.notes or '',
             'link_url_name': 'customer_vendor:payment_view',
             'link_pk': pay.id,
             'sort_key': (pay.payment_date, 1, pay.id),
+            'visible': matches_search and matches_type,
         })
 
     rows.sort(key=lambda r: r['sort_key'])
@@ -101,12 +124,13 @@ def build_customer_ledger(customer, start_date, end_date):
         running_balance += row['debit'] - row['credit']
         row['balance'] = running_balance
 
-    total_debit = sum((r['debit'] for r in rows), Decimal('0.00'))
-    total_credit = sum((r['credit'] for r in rows), Decimal('0.00'))
+    visible_rows = [row for row in rows if row['visible']]
+    total_debit = sum((r['debit'] for r in visible_rows), Decimal('0.00'))
+    total_credit = sum((r['credit'] for r in visible_rows), Decimal('0.00'))
 
     return {
         'brought_forward': brought_forward,
-        'rows': rows,
+        'rows': visible_rows,
         'total_debit': total_debit,
         'total_credit': total_credit,
         'closing_balance': running_balance,
@@ -129,7 +153,10 @@ class LedgerView(LoginRequiredMixin, View):
 
         if filters['customer_id']:
             customer = get_object_or_404(CustomerVendor, pk=filters['customer_id'], entity_type='customer')
-            ledger = build_customer_ledger(customer, filters['start_date'], filters['end_date'])
+            ledger = build_customer_ledger(
+                customer, filters['start_date'], filters['end_date'],
+                search=filters['search'], txn_type=filters['txn_type'],
+            )
             context['selected_customer'] = customer
             context['ledger'] = ledger
             context['invoiced_total'] = ledger['total_debit']
@@ -174,7 +201,9 @@ class LedgerPrintView(LoginRequiredMixin, View):
         customer = get_object_or_404(CustomerVendor, pk=customer_id, entity_type='customer')
         start_date = request.GET.get('start_date', '')
         end_date = request.GET.get('end_date', '')
-        ledger = build_customer_ledger(customer, start_date, end_date)
+        search = request.GET.get('search', '').strip()
+        txn_type = request.GET.get('txn_type', '')
+        ledger = build_customer_ledger(customer, start_date, end_date, search=search, txn_type=txn_type)
 
         context = {
             'customer': customer,
@@ -193,7 +222,9 @@ class LedgerExcelView(LoginRequiredMixin, View):
         customer = get_object_or_404(CustomerVendor, pk=customer_id, entity_type='customer')
         start_date = request.GET.get('start_date', '')
         end_date = request.GET.get('end_date', '')
-        ledger = build_customer_ledger(customer, start_date, end_date)
+        search = request.GET.get('search', '').strip()
+        txn_type = request.GET.get('txn_type', '')
+        ledger = build_customer_ledger(customer, start_date, end_date, search=search, txn_type=txn_type)
 
         wb = Workbook()
         ws = wb.active

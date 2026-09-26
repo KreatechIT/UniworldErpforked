@@ -749,6 +749,14 @@ class PaymentTests(CustomerEmployeeAssignmentBase):
         resp = self.client.get(reverse('customer_vendor:sales_order_view', args=[invoice.sales_order_id]))
         self.assertContains(resp, reverse('customer_vendor:invoice_view', args=[invoice.pk]))
 
+    def test_payment_list_with_no_params_redirects_to_today(self):
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:payment_list'))
+        self.assertEqual(resp.status_code, 302)
+        today = date.today().isoformat()
+        self.assertIn(f'start_date={today}', resp.url)
+        self.assertIn(f'end_date={today}', resp.url)
+
     def test_payment_list_shows_recorded_payments_and_links(self):
         invoice = self.make_confirmed_invoice()
         Payment.objects.create(
@@ -756,7 +764,7 @@ class PaymentTests(CustomerEmployeeAssignmentBase):
             amount=Decimal('75.00'), method=self.cash, created_by=self.admin,
         )
         self.client.force_login(self.admin)
-        resp = self.client.get(reverse('customer_vendor:payment_list'))
+        resp = self.client.get(reverse('customer_vendor:payment_list'), follow=True)
         self.assertContains(resp, '75.00')
         self.assertContains(resp, reverse('customer_vendor:invoice_view', args=[invoice.pk]))
 
@@ -808,10 +816,14 @@ class PaymentTests(CustomerEmployeeAssignmentBase):
         )
 
         self.client.force_login(self.admin)
-        resp = self.client.get(reverse('customer_vendor:payment_list'))
-        daily = {row['payment_date'].isoformat(): (row['total'], row['count']) for row in resp.context['daily_totals']}
-        self.assertEqual(daily['2026-09-20'], (Decimal('70.00'), 2))
-        self.assertEqual(daily['2026-09-21'], (Decimal('30.00'), 1))
+        resp = self.client.get(reverse('customer_vendor:payment_list'), {
+            'start_date': '2026-09-20', 'end_date': '2026-09-21',
+        })
+        self.assertEqual(resp.context['total_amount'], Decimal('100.00'))
+        self.assertEqual(resp.context['payment_count'], 3)
+        breakdown = {row['method__name']: (row['total'], row['count']) for row in resp.context['method_breakdown']}
+        self.assertEqual(breakdown['Cash'], (Decimal('70.00'), 2))
+        self.assertEqual(breakdown['City Bank A/C 1234'], (Decimal('30.00'), 1))
 
     def test_payment_model_clean_rejects_overpayment_directly(self):
         invoice = self.make_confirmed_invoice()
@@ -832,6 +844,83 @@ class PaymentTests(CustomerEmployeeAssignmentBase):
         resp = self.client.get(reverse('customer_vendor:payment_view', args=[payment.pk]))
         self.assertEqual(resp.status_code, 200)
         self.assertContains(resp, 'PAYMENT RECEIPT')
+
+    def test_quick_payment_form_only_lists_invoices_with_balance_due(self):
+        unpaid_invoice = self.make_confirmed_invoice()
+        paid_invoice = self.make_confirmed_invoice()
+        Payment.objects.create(
+            invoice=paid_invoice, customer=paid_invoice.customer, sales_employee=paid_invoice.sales_employee,
+            amount=paid_invoice.total_amount, method=self.cash, created_by=self.admin,
+        )
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:payment_list'), {
+            'start_date': '2020-01-01', 'end_date': '2030-12-31',
+        })
+        invoice_choices = set(resp.context['quick_payment_form'].fields['invoice'].queryset)
+        self.assertIn(unpaid_invoice, invoice_choices)
+        self.assertNotIn(paid_invoice, invoice_choices)
+
+    def test_quick_create_payment_records_against_selected_invoice(self):
+        invoice = self.make_confirmed_invoice()
+        self.client.force_login(self.admin)
+        resp = self.client.post(reverse('customer_vendor:payment_quick_create'), {
+            'invoice': invoice.pk, 'payment_date': '2026-09-24', 'amount': '80.00',
+            'method': self.cash.pk, 'received_by': 'Atiq',
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(resp.url, reverse('customer_vendor:payment_list'))
+        invoice.refresh_from_db()
+        self.assertEqual(invoice.paid_amount, Decimal('80.00'))
+        payment = Payment.objects.get(invoice=invoice)
+        self.assertEqual(payment.customer, invoice.customer)
+        self.assertEqual(payment.sales_employee, invoice.sales_employee)
+        self.assertEqual(payment.created_by, self.admin)
+
+    def test_quick_create_payment_requires_permission(self):
+        invoice = self.make_confirmed_invoice()
+        no_perm_user = User.objects.create_user('nopay2', password='pass')
+        self.client.force_login(no_perm_user)
+        resp = self.client.post(reverse('customer_vendor:payment_quick_create'), {
+            'invoice': invoice.pk, 'payment_date': '2026-09-24', 'amount': '80.00', 'method': self.cash.pk,
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.assertEqual(Payment.objects.filter(invoice=invoice).count(), 0)
+
+    def test_payment_invoice_history_marks_selected_and_orders_chronologically(self):
+        invoice = self.make_confirmed_invoice(quantity=3, unit_price=Decimal('100.00'))
+        p1 = Payment.objects.create(
+            invoice=invoice, customer=invoice.customer, sales_employee=invoice.sales_employee,
+            amount=Decimal('100.00'), method=self.cash, created_by=self.admin, payment_date='2026-09-01',
+        )
+        p2 = Payment.objects.create(
+            invoice=invoice, customer=invoice.customer, sales_employee=invoice.sales_employee,
+            amount=Decimal('100.00'), method=self.bank, created_by=self.admin, payment_date='2026-09-10',
+        )
+        p3 = Payment.objects.create(
+            invoice=invoice, customer=invoice.customer, sales_employee=invoice.sales_employee,
+            amount=Decimal('100.00'), method=self.cash, created_by=self.admin, payment_date='2026-09-20',
+        )
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:payment_invoice_history', args=[p2.pk]))
+        self.assertEqual(resp.status_code, 200)
+        data = resp.json()
+        self.assertEqual(data['invoice_id'], invoice.id)
+        self.assertEqual(len(data['payments']), 3)
+        self.assertEqual([p['id'] for p in data['payments']], [p1.id, p2.id, p3.id])
+        flags = {p['id']: p['is_selected'] for p in data['payments']}
+        self.assertEqual(flags, {p1.id: False, p2.id: True, p3.id: False})
+        self.assertEqual(data['balance_due'], '0.00')
+
+    def test_payment_invoice_history_requires_permission(self):
+        invoice = self.make_confirmed_invoice()
+        payment = Payment.objects.create(
+            invoice=invoice, customer=invoice.customer, sales_employee=invoice.sales_employee,
+            amount=Decimal('50.00'), method=self.cash, created_by=self.admin,
+        )
+        no_perm_user = User.objects.create_user('noview', password='pass')
+        self.client.force_login(no_perm_user)
+        resp = self.client.get(reverse('customer_vendor:payment_invoice_history', args=[payment.pk]))
+        self.assertEqual(resp.status_code, 403)
 
 
 class LedgerTests(CustomerEmployeeAssignmentBase):
@@ -884,6 +973,56 @@ class LedgerTests(CustomerEmployeeAssignmentBase):
         self.assertEqual(ledger['rows'][0]['balance'], Decimal('200.00'))
         self.assertEqual(ledger['rows'][1]['balance'], Decimal('150.00'))
         self.assertEqual(ledger['closing_balance'], Decimal('150.00'))
+
+    def test_ledger_txn_type_filter_hides_rows_but_keeps_balance_correct(self):
+        invoice = self.make_confirmed_invoice(self.c1a, self.emp1, quantity=2, unit_price=Decimal('100.00'), order_date=date(2026, 1, 5))
+        Payment.objects.create(
+            invoice=invoice, customer=invoice.customer, sales_employee=invoice.sales_employee,
+            amount=Decimal('50.00'), method=self.cash, created_by=self.admin, payment_date=date(2026, 1, 10),
+        )
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:ledger'), {
+            'customer': str(self.c1a.pk), 'preset': 'range',
+            'start_date': '2026-01-01', 'end_date': '2026-01-31',
+            'txn_type': 'payment',
+        })
+        ledger = resp.context['ledger']
+        self.assertEqual(len(ledger['rows']), 1)
+        self.assertEqual(ledger['rows'][0]['type'].startswith('Payment'), True)
+        self.assertEqual(ledger['rows'][0]['balance'], Decimal('150.00'))
+        self.assertEqual(ledger['closing_balance'], Decimal('150.00'))
+        self.assertEqual(ledger['total_credit'], Decimal('50.00'))
+
+        resp2 = self.client.get(reverse('customer_vendor:ledger'), {
+            'customer': str(self.c1a.pk), 'preset': 'range',
+            'start_date': '2026-01-01', 'end_date': '2026-01-31',
+            'txn_type': 'invoice',
+        })
+        ledger2 = resp2.context['ledger']
+        self.assertEqual(len(ledger2['rows']), 1)
+        self.assertEqual(ledger2['rows'][0]['type'], 'Invoice')
+        self.assertEqual(ledger2['closing_balance'], Decimal('150.00'))
+
+    def test_ledger_search_by_invoice_number(self):
+        invoice = self.make_confirmed_invoice(self.c1a, self.emp1, order_date=date(2026, 1, 5))
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:ledger'), {
+            'customer': str(self.c1a.pk), 'preset': 'range',
+            'start_date': '2026-01-01', 'end_date': '2026-01-31',
+            'search': str(invoice.id),
+        })
+        ledger = resp.context['ledger']
+        self.assertEqual(len(ledger['rows']), 1)
+        self.assertEqual(ledger['rows'][0]['link_pk'], invoice.id)
+
+        resp2 = self.client.get(reverse('customer_vendor:ledger'), {
+            'customer': str(self.c1a.pk), 'preset': 'range',
+            'start_date': '2026-01-01', 'end_date': '2026-01-31',
+            'search': 'no-such-ref-xyz',
+        })
+        ledger2 = resp2.context['ledger']
+        self.assertEqual(len(ledger2['rows']), 0)
+        self.assertEqual(ledger2['closing_balance'], invoice.total_amount)
 
     def test_ledger_brought_forward_rolls_up_earlier_transactions(self):
         invoice = self.make_confirmed_invoice(self.c1a, self.emp1, quantity=1, unit_price=Decimal('100.00'), order_date=date(2026, 1, 5))

@@ -61,8 +61,10 @@ urlpatterns = [
 
     path('payments/', payment_views.PaymentListView.as_view(), name='payment_list'),
     path('payments/create/<int:invoice_id>/', payment_views.PaymentCreateView.as_view(), name='payment_create'),
+    path('payments/quick-create/', payment_views.PaymentQuickCreateView.as_view(), name='payment_quick_create'),
     path('payments/update/<int:pk>/', payment_views.PaymentUpdateView.as_view(), name='payment_update'),
     path('payments/view/<int:pk>/', payment_views.PaymentDetailView.as_view(), name='payment_view'),
+    path('payments/invoice-history/<int:pk>/', payment_views.PaymentInvoiceHistoryView.as_view(), name='payment_invoice_history'),
     path('payments/delete/<int:pk>/', payment_views.PaymentDeleteView.as_view(), name='payment_delete'),
 
 
