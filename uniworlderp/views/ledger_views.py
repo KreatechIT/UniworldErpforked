@@ -1,4 +1,8 @@
 from .common_imports import *
+from decimal import Decimal, InvalidOperation
+from django.contrib import messages
+from django.shortcuts import redirect
+from django.urls import reverse
 from django.utils import timezone
 from django.http import HttpResponse
 from openpyxl import Workbook
@@ -55,7 +59,7 @@ def build_customer_ledger(customer, start_date, end_date, search='', txn_type=''
 
     invoiced_before = invoices_before.aggregate(total=Sum('total_amount'))['total'] or Decimal('0.00')
     paid_before = payments_before.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-    brought_forward = invoiced_before - paid_before
+    brought_forward = customer.opening_balance + invoiced_before - paid_before
 
     invoices = ARInvoice.objects.filter(customer=customer).select_related('sales_order')
     payments = Payment.objects.filter(customer=customer).select_related('invoice', 'method')
@@ -158,6 +162,8 @@ class LedgerView(LoginRequiredMixin, View):
                 search=filters['search'], txn_type=filters['txn_type'],
             )
             context['selected_customer'] = customer
+            context['can_edit_opening'] = request.user.has_perm('uniworlderp.change_customervendor')
+            context['return_qs'] = request.GET.urlencode()
             context['ledger'] = ledger
             context['invoiced_total'] = ledger['total_debit']
             context['collected_total'] = ledger['total_credit']
@@ -182,12 +188,38 @@ class LedgerView(LoginRequiredMixin, View):
 
             context['invoiced_total'] = all_invoices.aggregate(total=Sum('total_amount'))['total'] or Decimal('0.00')
             context['collected_total'] = all_payments.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-            context['outstanding_total'] = context['invoiced_total'] - context['collected_total']
+            opening_customers = CustomerVendor.objects.filter(entity_type='customer')
+            if filters['sales_employee_id']:
+                opening_customers = opening_customers.filter(sales_employee_id=filters['sales_employee_id'])
+            opening_total = opening_customers.aggregate(total=Sum('opening_balance'))['total'] or Decimal('0.00')
+            context['outstanding_total'] = opening_total + context['invoiced_total'] - context['collected_total']
             context['overdue_count'] = ARInvoice.objects.exclude(payment_status='C').filter(
                 due_date__lt=timezone.now()
             ).count()
 
         return render(request, self.template_name, context)
+
+
+class LedgerOpeningBalanceView(LoginRequiredMixin, View):
+    def post(self, request):
+        back = reverse('customer_vendor:ledger') + ('?' + request.POST['return_qs'] if request.POST.get('return_qs') else '')
+        if not request.user.has_perm('uniworlderp.change_customervendor'):
+            messages.error(request, "You do not have permission to change opening balances.")
+            return redirect(back)
+
+        customer = get_object_or_404(CustomerVendor, pk=request.POST.get('customer'), entity_type='customer')
+        try:
+            amount = Decimal(request.POST.get('opening_balance', '').strip() or '0').quantize(Decimal('0.01'))
+            if abs(amount) >= Decimal('10000000000'):
+                raise InvalidOperation
+        except InvalidOperation:
+            messages.error(request, "Enter a valid opening balance amount.")
+            return redirect(back)
+
+        customer.opening_balance = amount
+        customer.save(update_fields=['opening_balance', 'updated_at'])
+        messages.success(request, f"Opening balance for {customer.name} set to {amount}.")
+        return redirect(back)
 
 
 class LedgerPrintView(LoginRequiredMixin, View):

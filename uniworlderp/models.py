@@ -45,6 +45,11 @@ class CustomerVendor(models.Model):
         related_name='customers',
         verbose_name='Sales Employee'
     )
+    opening_balance = models.DecimalField(
+        max_digits=12, decimal_places=2, default=Decimal('0.00'),
+        verbose_name='Opening Balance (Due)',
+        help_text='Amount the customer already owed before invoices were tracked in this system. Starts the ledger.'
+    )
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)
     owner = models.ForeignKey(settings.AUTH_USER_MODEL, on_delete=models.CASCADE, related_name='customer_vendors')

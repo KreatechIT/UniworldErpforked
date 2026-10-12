@@ -105,11 +105,45 @@
             <div class="mb-4 flex flex-wrap justify-between items-center gap-2">
                 <h3 class="text-lg font-semibold">Statement — {{ selected_customer.name }}</h3>
                 <div class="flex gap-2">
-                    <a href="{% url 'customer_vendor:ledger_print' %}?customer={{ selected_customer.id }}&start_date={{ start_date }}&end_date={{ end_date }}&search={{ search|urlencode }}&txn_type={{ txn_type }}" target="_blank" class="btn-secondary">Print Statement</a>
-                    <a href="{% url 'customer_vendor:ledger_excel' %}?customer={{ selected_customer.id }}&start_date={{ start_date }}&end_date={{ end_date }}&search={{ search|urlencode }}&txn_type={{ txn_type }}" class="btn-secondary">Export to Excel</a>
-                    <button type="button" class="export-button btn-secondary" data-table-id="ledgerTable">Export as CSV</button>
+                    {% if can_edit_opening %}<button type="button" id="openingBalanceOpen" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-md transition bg-[#a31319] hover:bg-[#8a1015]"><i class="ri-wallet-3-line mr-1"></i>Opening Balance / Due</button>{% endif %}
+                    <a href="{% url 'customer_vendor:ledger_print' %}?customer={{ selected_customer.id }}&start_date={{ start_date }}&end_date={{ end_date }}&search={{ search|urlencode }}&txn_type={{ txn_type }}" target="_blank" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-md transition bg-gray-700 hover:bg-gray-600"><i class="ri-printer-line mr-1"></i>Print Statement</a>
+                    <a href="{% url 'customer_vendor:ledger_excel' %}?customer={{ selected_customer.id }}&start_date={{ start_date }}&end_date={{ end_date }}&search={{ search|urlencode }}&txn_type={{ txn_type }}" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-md transition bg-gray-700 hover:bg-gray-600"><i class="ri-file-excel-2-line mr-1"></i>Export to Excel</a>
+                    <button type="button" class="export-button inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-md transition bg-gray-700 hover:bg-gray-600" data-table-id="ledgerTable"><i class="ri-file-text-line mr-1"></i>Export as CSV</button>
                 </div>
             </div>
+
+            {% if can_edit_opening %}
+            <div id="openingBalanceModal" class="hidden fixed inset-0 z-50 flex items-center justify-center bg-black/60 p-4">
+                <form method="post" action="{% url 'customer_vendor:ledger_opening_balance' %}" class="w-full max-w-md rounded-lg bg-[hsl(var(--background))] border border-[hsl(var(--border))] p-6 shadow-xl">
+                    {% csrf_token %}
+                    <input type="hidden" name="customer" value="{{ selected_customer.id }}">
+                    <input type="hidden" name="return_qs" value="{{ return_qs }}">
+                    <h3 class="text-lg font-semibold mb-1">Opening Balance / Due</h3>
+                    <p class="text-sm text-[hsl(var(--muted-foreground))] mb-4">{{ selected_customer.name }} &mdash; the amount this customer already owes (due) before invoices were tracked in this system.</p>
+                    <input type="number" step="0.01" name="opening_balance" id="openingBalanceInput" value="{{ selected_customer.opening_balance }}" class="w-full px-3 py-2 rounded-lg border border-[hsl(var(--border))] bg-[hsl(var(--background))] mb-4">
+                    <div class="flex justify-end gap-2">
+                        <button type="button" id="openingBalanceCancel" class="px-4 py-2 text-sm font-medium text-white rounded-md bg-gray-500 hover:bg-gray-400">Cancel</button>
+                        <button type="submit" class="px-4 py-2 text-sm font-medium text-white rounded-md bg-[#a31319] hover:bg-[#8a1015]">Save</button>
+                    </div>
+                </form>
+            </div>
+            <style>
+                #openingBalanceInput { -moz-appearance: textfield; appearance: textfield; }
+                #openingBalanceInput::-webkit-outer-spin-button,
+                #openingBalanceInput::-webkit-inner-spin-button { -webkit-appearance: none; margin: 0; }
+            </style>
+            <script>
+                (function () {
+                    var modal = document.getElementById('openingBalanceModal');
+                    var open = function () { modal.classList.remove('hidden'); document.getElementById('openingBalanceInput').focus(); };
+                    var close = function () { modal.classList.add('hidden'); };
+                    document.getElementById('openingBalanceOpen').addEventListener('click', open);
+                    document.getElementById('openingBalanceCancel').addEventListener('click', close);
+                    modal.addEventListener('click', function (e) { if (e.target === modal) close(); });
+                    document.addEventListener('keydown', function (e) { if (e.key === 'Escape') close(); });
+                })();
+            </script>
+            {% endif %}
 
             <div class="overflow-x-auto table-container">
                 <div class="bg-gradient-to-br from-[#a31319] to-black rounded-lg shadow-lg overflow-hidden">

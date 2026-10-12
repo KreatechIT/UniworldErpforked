@@ -107,6 +107,7 @@ urlpatterns = [
     path('reports/finance/excel/', report_views.FinanceReportExcelView.as_view(), name='finance_report_excel'),
 
     path('ledger/', ledger_views.LedgerView.as_view(), name='ledger'),
+    path('ledger/opening-balance/', ledger_views.LedgerOpeningBalanceView.as_view(), name='ledger_opening_balance'),
     path('ledger/print/', ledger_views.LedgerPrintView.as_view(), name='ledger_print'),
     path('ledger/excel/', ledger_views.LedgerExcelView.as_view(), name='ledger_excel'),
 

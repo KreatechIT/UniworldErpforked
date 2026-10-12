@@ -974,6 +974,34 @@ class LedgerTests(CustomerEmployeeAssignmentBase):
         self.assertEqual(ledger['rows'][1]['balance'], Decimal('150.00'))
         self.assertEqual(ledger['closing_balance'], Decimal('150.00'))
 
+    def test_ledger_includes_customer_opening_balance(self):
+        CustomerVendor.objects.filter(pk=self.c1a.pk).update(opening_balance=Decimal('500.00'))
+        self.make_confirmed_invoice(self.c1a, self.emp1, quantity=2, unit_price=Decimal('100.00'), order_date=date(2026, 1, 5))
+        self.client.force_login(self.admin)
+        resp = self.client.get(reverse('customer_vendor:ledger'), {
+            'customer': str(self.c1a.pk), 'preset': 'range',
+            'start_date': '2026-01-01', 'end_date': '2026-01-31',
+        })
+        ledger = resp.context['ledger']
+        self.assertEqual(ledger['brought_forward'], Decimal('500.00'))
+        self.assertEqual(ledger['rows'][0]['balance'], Decimal('700.00'))
+        self.assertEqual(ledger['closing_balance'], Decimal('700.00'))
+
+    def test_opening_balance_can_be_set_from_ledger(self):
+        self.client.force_login(self.admin)
+        resp = self.client.post(reverse('customer_vendor:ledger_opening_balance'), {
+            'customer': str(self.c1a.pk), 'opening_balance': '750.50',
+            'return_qs': f'customer={self.c1a.pk}',
+        })
+        self.assertEqual(resp.status_code, 302)
+        self.c1a.refresh_from_db()
+        self.assertEqual(self.c1a.opening_balance, Decimal('750.50'))
+        resp = self.client.post(reverse('customer_vendor:ledger_opening_balance'), {
+            'customer': str(self.c1a.pk), 'opening_balance': 'abc',
+        })
+        self.c1a.refresh_from_db()
+        self.assertEqual(self.c1a.opening_balance, Decimal('750.50'))
+
     def test_ledger_txn_type_filter_hides_rows_but_keeps_balance_correct(self):
         invoice = self.make_confirmed_invoice(self.c1a, self.emp1, quantity=2, unit_price=Decimal('100.00'), order_date=date(2026, 1, 5))
         Payment.objects.create(
