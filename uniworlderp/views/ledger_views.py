@@ -167,6 +167,7 @@ class LedgerView(LoginRequiredMixin, View):
             context['ledger'] = ledger
             context['invoiced_total'] = ledger['total_debit']
             context['collected_total'] = ledger['total_credit']
+            context['brought_forward'] = ledger['brought_forward']
             context['outstanding_total'] = ledger['closing_balance']
             context['overdue_count'] = ARInvoice.objects.filter(
                 customer=customer,
@@ -192,7 +193,17 @@ class LedgerView(LoginRequiredMixin, View):
             if filters['sales_employee_id']:
                 opening_customers = opening_customers.filter(sales_employee_id=filters['sales_employee_id'])
             opening_total = opening_customers.aggregate(total=Sum('opening_balance'))['total'] or Decimal('0.00')
-            context['outstanding_total'] = opening_total + context['invoiced_total'] - context['collected_total']
+            before_invoices = ARInvoice.objects.filter(invoice_date__lt=filters['start_date'])
+            before_payments = Payment.objects.filter(payment_date__lt=filters['start_date'])
+            if filters['sales_employee_id']:
+                before_invoices = before_invoices.filter(sales_employee_id=filters['sales_employee_id'])
+                before_payments = before_payments.filter(sales_employee_id=filters['sales_employee_id'])
+            context['brought_forward'] = (
+                opening_total
+                + (before_invoices.aggregate(total=Sum('total_amount'))['total'] or Decimal('0.00'))
+                - (before_payments.aggregate(total=Sum('amount'))['total'] or Decimal('0.00'))
+            )
+            context['outstanding_total'] = context['brought_forward'] + context['invoiced_total'] - context['collected_total']
             context['overdue_count'] = ARInvoice.objects.exclude(payment_status='C').filter(
                 due_date__lt=timezone.now()
             ).count()

@@ -79,6 +79,10 @@
 
         <div class="flex flex-wrap gap-4 mb-6">
             <div class="p-4 rounded-lg bg-[hsl(var(--muted))]">
+                <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">Opening / Brought Fwd</div>
+                <div class="text-xl font-semibold">{{ brought_forward|floatformat:2 }}</div>
+            </div>
+            <div class="p-4 rounded-lg bg-[hsl(var(--muted))]">
                 <div class="text-xs uppercase text-[hsl(var(--muted-foreground))]">Invoiced</div>
                 <div class="text-xl font-semibold">{{ invoiced_total|floatformat:2 }}</div>
             </div>
