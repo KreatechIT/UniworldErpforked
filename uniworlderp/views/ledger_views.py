@@ -3,12 +3,21 @@ from decimal import Decimal, InvalidOperation
 from django.contrib import messages
 from django.shortcuts import redirect
 from django.urls import reverse
+from django.conf import settings
 from django.utils import timezone
 from django.http import HttpResponse
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment
 import io
 from uniworlderp.models import ARInvoice, Payment, CustomerVendor, SalesEmployee
+
+
+def counted_invoices():
+    return ARInvoice.objects.filter(invoice_date__gte=settings.FINANCE_GO_LIVE_DATE)
+
+
+def counted_payments():
+    return Payment.objects.filter(payment_date__gte=settings.FINANCE_GO_LIVE_DATE)
 
 
 def get_ledger_filters(request):
@@ -48,8 +57,8 @@ def get_ledger_filters(request):
 def build_customer_ledger(customer, start_date, end_date, search='', txn_type=''):
     brought_forward = Decimal('0.00')
 
-    invoices_before = ARInvoice.objects.filter(customer=customer)
-    payments_before = Payment.objects.filter(customer=customer)
+    invoices_before = counted_invoices().filter(customer=customer)
+    payments_before = counted_payments().filter(customer=customer)
     if start_date:
         invoices_before = invoices_before.filter(invoice_date__lt=start_date)
         payments_before = payments_before.filter(payment_date__lt=start_date)
@@ -61,8 +70,8 @@ def build_customer_ledger(customer, start_date, end_date, search='', txn_type=''
     paid_before = payments_before.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
     brought_forward = customer.opening_balance + invoiced_before - paid_before
 
-    invoices = ARInvoice.objects.filter(customer=customer).select_related('sales_order')
-    payments = Payment.objects.filter(customer=customer).select_related('invoice', 'method')
+    invoices = counted_invoices().filter(customer=customer).select_related('sales_order')
+    payments = counted_payments().filter(customer=customer).select_related('invoice', 'method')
     if start_date:
         invoices = invoices.filter(invoice_date__gte=start_date)
         payments = payments.filter(payment_date__gte=start_date)
@@ -169,14 +178,14 @@ class LedgerView(LoginRequiredMixin, View):
             context['collected_total'] = ledger['total_credit']
             context['brought_forward'] = ledger['brought_forward']
             context['outstanding_total'] = ledger['closing_balance']
-            context['overdue_count'] = ARInvoice.objects.filter(
+            context['overdue_count'] = counted_invoices().filter(
                 customer=customer,
             ).exclude(payment_status='C').filter(
                 due_date__lt=timezone.now()
             ).count()
         else:
-            all_invoices = ARInvoice.objects.all()
-            all_payments = Payment.objects.all()
+            all_invoices = counted_invoices()
+            all_payments = counted_payments()
             if filters['start_date']:
                 all_invoices = all_invoices.filter(invoice_date__gte=filters['start_date'])
                 all_payments = all_payments.filter(payment_date__gte=filters['start_date'])
@@ -193,8 +202,8 @@ class LedgerView(LoginRequiredMixin, View):
             if filters['sales_employee_id']:
                 opening_customers = opening_customers.filter(sales_employee_id=filters['sales_employee_id'])
             opening_total = opening_customers.aggregate(total=Sum('opening_balance'))['total'] or Decimal('0.00')
-            before_invoices = ARInvoice.objects.filter(invoice_date__lt=filters['start_date'])
-            before_payments = Payment.objects.filter(payment_date__lt=filters['start_date'])
+            before_invoices = counted_invoices().filter(invoice_date__lt=filters['start_date'])
+            before_payments = counted_payments().filter(payment_date__lt=filters['start_date'])
             if filters['sales_employee_id']:
                 before_invoices = before_invoices.filter(sales_employee_id=filters['sales_employee_id'])
                 before_payments = before_payments.filter(sales_employee_id=filters['sales_employee_id'])
@@ -204,7 +213,7 @@ class LedgerView(LoginRequiredMixin, View):
                 - (before_payments.aggregate(total=Sum('amount'))['total'] or Decimal('0.00'))
             )
             context['outstanding_total'] = context['brought_forward'] + context['invoiced_total'] - context['collected_total']
-            context['overdue_count'] = ARInvoice.objects.exclude(payment_status='C').filter(
+            context['overdue_count'] = counted_invoices().exclude(payment_status='C').filter(
                 due_date__lt=timezone.now()
             ).count()
 

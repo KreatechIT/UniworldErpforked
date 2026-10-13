@@ -13,6 +13,7 @@ https://docs.djangoproject.com/en/5.0/ref/settings/
 import os
 from decouple import config
 from dj_database_url import parse as db_url
+from datetime import date
 from pathlib import Path
 
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
@@ -291,3 +292,6 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 #         'width': '100%',  # Editor width
 #     }
 # }
+
+# Invoices and payments dated before this are ignored by the ledger; opening balances stand in for them.
+FINANCE_GO_LIVE_DATE = date(2026, 10, 13)
