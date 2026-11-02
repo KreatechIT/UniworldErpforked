@@ -9,6 +9,9 @@ from django.http import HttpResponse
 from openpyxl import Workbook
 from openpyxl.styles import Font, Alignment
 import io
+import re
+from django.db.models import Q
+from django.db.models.functions import Lower
 from uniworlderp.models import ARInvoice, Payment, CustomerVendor, SalesEmployee
 
 
@@ -18,6 +21,30 @@ def counted_invoices():
 
 def counted_payments():
     return Payment.objects.filter(payment_date__gte=settings.FINANCE_GO_LIVE_DATE)
+
+
+def employee_scoped(invoices, payments, sales_employee_id):
+    """Employee = who recorded the invoice / payment."""
+    if sales_employee_id:
+        invoices = invoices.filter(sales_employee_id=sales_employee_id)
+        payments = payments.filter(sales_employee_id=sales_employee_id)
+    return invoices, payments
+
+
+def customers_for_employee(sales_employee_id):
+    customers = CustomerVendor.objects.filter(entity_type='customer')
+    if sales_employee_id:
+        customers = customers.filter(
+            Q(sales_employee_id=sales_employee_id)
+            | Q(id__in=counted_invoices().filter(sales_employee_id=sales_employee_id).values('customer'))
+            | Q(id__in=counted_payments().filter(sales_employee_id=sales_employee_id).values('customer'))
+        )
+    return customers
+
+
+def opening_applies(customer, sales_employee_id):
+    # Opening balance belongs to the customer, so only count it when not narrowing by another employee.
+    return not sales_employee_id or str(customer.sales_employee_id) == str(sales_employee_id)
 
 
 def get_ledger_filters(request):
@@ -54,11 +81,11 @@ def get_ledger_filters(request):
     }
 
 
-def build_customer_ledger(customer, start_date, end_date, search='', txn_type=''):
+def build_customer_ledger(customer, start_date, end_date, search='', txn_type='', sales_employee_id=''):
     brought_forward = Decimal('0.00')
 
-    invoices_before = counted_invoices().filter(customer=customer)
-    payments_before = counted_payments().filter(customer=customer)
+    invoices_before, payments_before = employee_scoped(
+        counted_invoices().filter(customer=customer), counted_payments().filter(customer=customer), sales_employee_id)
     if start_date:
         invoices_before = invoices_before.filter(invoice_date__lt=start_date)
         payments_before = payments_before.filter(payment_date__lt=start_date)
@@ -68,10 +95,12 @@ def build_customer_ledger(customer, start_date, end_date, search='', txn_type=''
 
     invoiced_before = invoices_before.aggregate(total=Sum('total_amount'))['total'] or Decimal('0.00')
     paid_before = payments_before.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-    brought_forward = customer.opening_balance + invoiced_before - paid_before
+    brought_forward = (customer.opening_balance if opening_applies(customer, sales_employee_id) else Decimal('0.00')) + invoiced_before - paid_before
 
-    invoices = counted_invoices().filter(customer=customer).select_related('sales_order')
-    payments = counted_payments().filter(customer=customer).select_related('invoice', 'method')
+    invoices, payments = employee_scoped(
+        counted_invoices().filter(customer=customer), counted_payments().filter(customer=customer), sales_employee_id)
+    invoices = invoices.select_related('sales_order')
+    payments = payments.select_related('invoice', 'method')
     if start_date:
         invoices = invoices.filter(invoice_date__gte=start_date)
         payments = payments.filter(payment_date__gte=start_date)
@@ -150,13 +179,84 @@ def build_customer_ledger(customer, start_date, end_date, search='', txn_type=''
     }
 
 
+def build_customers_summary(filters):
+    """Customer-wise summary (no customer selected). Employee = customer's assigned employee."""
+    emp = filters['sales_employee_id']
+    customers = customers_for_employee(emp).select_related('sales_employee').order_by(Lower('name'))
+
+    start, end = filters['start_date'], filters['end_date']
+    invoices, payments = employee_scoped(
+        counted_invoices().filter(customer__in=customers), counted_payments().filter(customer__in=customers), emp)
+
+    def totals(qs, amount):
+        return {r['customer']: r['t'] or Decimal('0.00')
+                for r in qs.order_by().values('customer').annotate(t=Sum(amount))}
+
+    in_inv_qs = invoices.filter(invoice_date__gte=start, invoice_date__lte=end)
+    in_pay_qs = payments.filter(payment_date__gte=start, payment_date__lte=end)
+    before_inv = totals(invoices.filter(invoice_date__lt=start), 'total_amount')
+    before_pay = totals(payments.filter(payment_date__lt=start), 'amount')
+    in_inv = totals(in_inv_qs, 'total_amount')
+    in_pay = totals(in_pay_qs, 'amount')
+
+    # Invoiced / Collected honour Type and Search; Outstanding always uses the full figures.
+    shown_inv_qs, shown_pay_qs = in_inv_qs, in_pay_qs
+    if filters['txn_type'] == 'payment':
+        shown_inv_qs = shown_inv_qs.none()
+    if filters['txn_type'] == 'invoice':
+        shown_pay_qs = shown_pay_qs.none()
+    digits = re.sub(r'\D', '', filters['search'])
+    if digits:
+        shown_inv_qs = shown_inv_qs.filter(Q(id__icontains=digits) | Q(sales_order_id__icontains=digits))
+        shown_pay_qs = shown_pay_qs.filter(Q(id__icontains=digits) | Q(invoice_id__icontains=digits))
+    shown_inv = totals(shown_inv_qs, 'total_amount')
+    shown_pay = totals(shown_pay_qs, 'amount')
+
+    employee_names = {}
+    for qs in (invoices, payments):
+        for r in qs.order_by().values('customer', 'sales_employee__full_name').distinct():
+            if r['sales_employee__full_name']:
+                employee_names.setdefault(r['customer'], set()).add(r['sales_employee__full_name'])
+
+    rows = []
+    for c in customers:
+        zero = Decimal('0.00')
+        bf = ((c.opening_balance or zero) if opening_applies(c, emp) else zero) + before_inv.get(c.id, zero) - before_pay.get(c.id, zero)
+        invoiced, collected = shown_inv.get(c.id, zero), shown_pay.get(c.id, zero)
+        outstanding = bf + in_inv.get(c.id, zero) - in_pay.get(c.id, zero)
+        if digits and not (invoiced or collected):
+            continue
+        if not (bf or invoiced or collected or outstanding or in_inv.get(c.id) or in_pay.get(c.id)):
+            continue
+        rows.append({
+            'customer': c,
+            'employee': ', '.join(sorted(employee_names.get(c.id, ()))),
+            'brought_forward': bf,
+            'invoiced': invoiced,
+            'collected': collected,
+            'outstanding': outstanding,
+        })
+
+    def total(key):
+        return sum((r[key] for r in rows), Decimal('0.00'))
+
+    return {
+        'rows': rows,
+        'brought_forward': total('brought_forward'),
+        'invoiced': total('invoiced'),
+        'collected': total('collected'),
+        'outstanding': total('outstanding'),
+        'customers': customers,
+    }
+
+
 class LedgerView(LoginRequiredMixin, View):
     template_name = 'ledger/ledger.html'
 
     def get(self, request):
-        customers = CustomerVendor.objects.filter(entity_type='customer').order_by('name')
-        sales_employees = SalesEmployee.objects.order_by('full_name')
+        sales_employees = SalesEmployee.objects.order_by(Lower('full_name'))
         filters = get_ledger_filters(request)
+        customers = customers_for_employee(filters['sales_employee_id']).order_by(Lower('name'))
 
         context = {
             'customers': customers,
@@ -169,6 +269,7 @@ class LedgerView(LoginRequiredMixin, View):
             ledger = build_customer_ledger(
                 customer, filters['start_date'], filters['end_date'],
                 search=filters['search'], txn_type=filters['txn_type'],
+                sales_employee_id=filters['sales_employee_id'],
             )
             context['selected_customer'] = customer
             context['can_edit_opening'] = request.user.has_perm('uniworlderp.change_customervendor')
@@ -178,44 +279,25 @@ class LedgerView(LoginRequiredMixin, View):
             context['collected_total'] = ledger['total_credit']
             context['brought_forward'] = ledger['brought_forward']
             context['outstanding_total'] = ledger['closing_balance']
-            context['overdue_count'] = counted_invoices().filter(
+            overdue = counted_invoices().filter(
                 customer=customer,
-            ).exclude(payment_status='C').filter(
-                due_date__lt=timezone.now()
-            ).count()
+            ).exclude(payment_status='C').filter(due_date__date__lt=timezone.localdate())
+            if filters['sales_employee_id']:
+                overdue = overdue.filter(sales_employee_id=filters['sales_employee_id'])
+            context['overdue_count'] = overdue.count()
         else:
-            all_invoices = counted_invoices()
-            all_payments = counted_payments()
-            if filters['start_date']:
-                all_invoices = all_invoices.filter(invoice_date__gte=filters['start_date'])
-                all_payments = all_payments.filter(payment_date__gte=filters['start_date'])
-            if filters['end_date']:
-                all_invoices = all_invoices.filter(invoice_date__lte=filters['end_date'])
-                all_payments = all_payments.filter(payment_date__lte=filters['end_date'])
+            summary = build_customers_summary(filters)
+            context['summary'] = summary
+            context['brought_forward'] = summary['brought_forward']
+            context['invoiced_total'] = summary['invoiced']
+            context['collected_total'] = summary['collected']
+            context['outstanding_total'] = summary['outstanding']
+            context['overdue_count'] = counted_invoices().filter(
+                customer__in=summary['customers'],
+            ).exclude(payment_status='C').filter(due_date__date__lt=timezone.localdate())
             if filters['sales_employee_id']:
-                all_invoices = all_invoices.filter(sales_employee_id=filters['sales_employee_id'])
-                all_payments = all_payments.filter(sales_employee_id=filters['sales_employee_id'])
-
-            context['invoiced_total'] = all_invoices.aggregate(total=Sum('total_amount'))['total'] or Decimal('0.00')
-            context['collected_total'] = all_payments.aggregate(total=Sum('amount'))['total'] or Decimal('0.00')
-            opening_customers = CustomerVendor.objects.filter(entity_type='customer')
-            if filters['sales_employee_id']:
-                opening_customers = opening_customers.filter(sales_employee_id=filters['sales_employee_id'])
-            opening_total = opening_customers.aggregate(total=Sum('opening_balance'))['total'] or Decimal('0.00')
-            before_invoices = counted_invoices().filter(invoice_date__lt=filters['start_date'])
-            before_payments = counted_payments().filter(payment_date__lt=filters['start_date'])
-            if filters['sales_employee_id']:
-                before_invoices = before_invoices.filter(sales_employee_id=filters['sales_employee_id'])
-                before_payments = before_payments.filter(sales_employee_id=filters['sales_employee_id'])
-            context['brought_forward'] = (
-                opening_total
-                + (before_invoices.aggregate(total=Sum('total_amount'))['total'] or Decimal('0.00'))
-                - (before_payments.aggregate(total=Sum('amount'))['total'] or Decimal('0.00'))
-            )
-            context['outstanding_total'] = context['brought_forward'] + context['invoiced_total'] - context['collected_total']
-            context['overdue_count'] = counted_invoices().exclude(payment_status='C').filter(
-                due_date__lt=timezone.now()
-            ).count()
+                context['overdue_count'] = context['overdue_count'].filter(sales_employee_id=filters['sales_employee_id'])
+            context['overdue_count'] = context['overdue_count'].count()
 
         return render(request, self.template_name, context)
 
@@ -255,7 +337,8 @@ class LedgerPrintView(LoginRequiredMixin, View):
         end_date = request.GET.get('end_date', '')
         search = request.GET.get('search', '').strip()
         txn_type = request.GET.get('txn_type', '')
-        ledger = build_customer_ledger(customer, start_date, end_date, search=search, txn_type=txn_type)
+        ledger = build_customer_ledger(customer, start_date, end_date, search=search, txn_type=txn_type,
+                                       sales_employee_id=request.GET.get('sales_employee', ''))
 
         context = {
             'customer': customer,
@@ -276,7 +359,8 @@ class LedgerExcelView(LoginRequiredMixin, View):
         end_date = request.GET.get('end_date', '')
         search = request.GET.get('search', '').strip()
         txn_type = request.GET.get('txn_type', '')
-        ledger = build_customer_ledger(customer, start_date, end_date, search=search, txn_type=txn_type)
+        ledger = build_customer_ledger(customer, start_date, end_date, search=search, txn_type=txn_type,
+                                       sales_employee_id=request.GET.get('sales_employee', ''))
 
         wb = Workbook()
         ws = wb.active

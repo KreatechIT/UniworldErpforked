@@ -51,7 +51,7 @@
                 </div>
                 <div>
                     <label class="block text-xs text-[hsl(var(--muted-foreground))]">Sales Employee</label>
-                    <select name="sales_employee" onchange="this.form.submit()" class="form-input py-3 w-full sm:w-56 bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm">
+                    <select name="sales_employee" onchange="this.form.elements['customer'].value=''; this.form.submit()" class="form-input py-3 w-full sm:w-56 bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm">
                         <option value="">All Sales Employees</option>
                         {% for employee in sales_employees %}
                             <option value="{{ employee.id }}" {% if sales_employee_id == employee.id|stringformat:"s" %}selected{% endif %}>{{ employee.full_name }}</option>
@@ -60,7 +60,7 @@
                 </div>
                 <div>
                     <label class="block text-xs text-[hsl(var(--muted-foreground))]">Type</label>
-                    <select name="txn_type" onchange="this.form.submit()" class="form-input py-3 w-full sm:w-40 bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm">
+                    <select name="txn_type" onchange="this.form.submit()" class="form-input py-3 w-full sm:w-52 bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm">
                         <option value="">Invoices &amp; Payments</option>
                         <option value="invoice" {% if txn_type == 'invoice' %}selected{% endif %}>Invoices only</option>
                         <option value="payment" {% if txn_type == 'payment' %}selected{% endif %}>Payments only</option>
@@ -101,17 +101,63 @@
         </div>
 
         {% if not customer_id %}
-            <div class="p-8 text-center text-[hsl(var(--muted-foreground))] border border-dashed border-[hsl(var(--border))] rounded-lg">
-                <i class="ri-user-search-line text-3xl mb-2 block"></i>
-                Select a customer above to see their statement (opening balance, invoices, payments, running balance).
+            <div class="mb-3 text-sm text-[hsl(var(--muted-foreground))]">
+                Customer-wise summary{% if sales_employee_id %} &mdash; only invoices and payments recorded by the selected sales employee{% else %} for all customers{% endif %} &mdash; click a customer to open their full statement.
+            </div>
+            <div class="overflow-x-auto table-container">
+                <div class="bg-gradient-to-br from-[#a31319] to-black rounded-lg shadow-lg overflow-hidden">
+                    <div class="p-6">
+                        <div class="overflow-x-auto">
+                            <table id="ledgerSummaryTable" class="w-full text-sm text-left text-gray-200">
+                                <thead class="text-xs uppercase bg-[#480d0f] text-gray-100">
+                                    <tr>
+                                        <th scope="col" class="px-6 py-3">Customer</th>
+                                        <th scope="col" class="px-6 py-3">Sales Employee</th>
+                                        <th scope="col" class="px-6 py-3">Brought Fwd</th>
+                                        <th scope="col" class="px-6 py-3">Invoiced</th>
+                                        <th scope="col" class="px-6 py-3">Collected</th>
+                                        <th scope="col" class="px-6 py-3">Outstanding</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    {% for r in summary.rows %}
+                                    <tr class="border-b border-gray-700 hover:bg-[#5a1114] transition-colors">
+                                        <td class="px-6 py-4 whitespace-nowrap">
+                                            <a href="?customer={{ r.customer.id }}&sales_employee={{ sales_employee_id }}&preset={{ preset }}&start_date={{ start_date }}&end_date={{ end_date }}&search={{ search|urlencode }}&txn_type={{ txn_type }}" class="underline hover:text-white">{{ r.customer.name }}</a>
+                                        </td>
+                                        <td class="px-6 py-4 whitespace-nowrap">{{ r.employee|default:"—" }}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap">{{ r.brought_forward|floatformat:2 }}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap">{{ r.invoiced|floatformat:2 }}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap text-green-300">{{ r.collected|floatformat:2 }}</td>
+                                        <td class="px-6 py-4 whitespace-nowrap font-semibold {% if r.outstanding > 0 %}text-red-300{% endif %}">{{ r.outstanding|floatformat:2 }}</td>
+                                    </tr>
+                                    {% empty %}
+                                    <tr>
+                                        <td colspan="6" class="px-6 py-4 text-center text-sm text-gray-400">No customer activity for these filters.</td>
+                                    </tr>
+                                    {% endfor %}
+                                </tbody>
+                                <tfoot>
+                                    <tr class="bg-[#480d0f] font-bold">
+                                        <td colspan="2" class="px-6 py-4 text-right">Totals:</td>
+                                        <td class="px-6 py-4">{{ summary.brought_forward|floatformat:2 }}</td>
+                                        <td class="px-6 py-4">{{ summary.invoiced|floatformat:2 }}</td>
+                                        <td class="px-6 py-4">{{ summary.collected|floatformat:2 }}</td>
+                                        <td class="px-6 py-4">{{ summary.outstanding|floatformat:2 }}</td>
+                                    </tr>
+                                </tfoot>
+                            </table>
+                        </div>
+                    </div>
+                </div>
             </div>
         {% else %}
             <div class="mb-4 flex flex-wrap justify-between items-center gap-2">
                 <h3 class="text-lg font-semibold">Statement — {{ selected_customer.name }}</h3>
                 <div class="flex gap-2">
                     {% if can_edit_opening %}<button type="button" id="openingBalanceOpen" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-md transition bg-[#a31319] hover:bg-[#8a1015]"><i class="ri-wallet-3-line mr-1"></i>Opening Balance / Due</button>{% endif %}
-                    <a href="{% url 'customer_vendor:ledger_print' %}?customer={{ selected_customer.id }}&start_date={{ start_date }}&end_date={{ end_date }}&search={{ search|urlencode }}&txn_type={{ txn_type }}" target="_blank" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-md transition bg-gray-700 hover:bg-gray-600"><i class="ri-printer-line mr-1"></i>Print Statement</a>
-                    <a href="{% url 'customer_vendor:ledger_excel' %}?customer={{ selected_customer.id }}&start_date={{ start_date }}&end_date={{ end_date }}&search={{ search|urlencode }}&txn_type={{ txn_type }}" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-md transition bg-gray-700 hover:bg-gray-600"><i class="ri-file-excel-2-line mr-1"></i>Export to Excel</a>
+                    <a href="{% url 'customer_vendor:ledger_print' %}?customer={{ selected_customer.id }}&start_date={{ start_date }}&end_date={{ end_date }}&search={{ search|urlencode }}&txn_type={{ txn_type }}&sales_employee={{ sales_employee_id }}" target="_blank" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-md transition bg-gray-700 hover:bg-gray-600"><i class="ri-printer-line mr-1"></i>Print Statement</a>
+                    <a href="{% url 'customer_vendor:ledger_excel' %}?customer={{ selected_customer.id }}&start_date={{ start_date }}&end_date={{ end_date }}&search={{ search|urlencode }}&txn_type={{ txn_type }}&sales_employee={{ sales_employee_id }}" class="inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-md transition bg-gray-700 hover:bg-gray-600"><i class="ri-file-excel-2-line mr-1"></i>Export to Excel</a>
                     <button type="button" class="export-button inline-flex items-center px-4 py-2 text-sm font-medium text-white rounded-md transition bg-gray-700 hover:bg-gray-600" data-table-id="ledgerTable"><i class="ri-file-text-line mr-1"></i>Export as CSV</button>
                 </div>
             </div>
@@ -237,6 +283,84 @@ document.addEventListener('DOMContentLoaded', function() {
             }
         });
     });
+
+
+    // Searchable (type-to-filter) dropdowns for Customer and Sales Employee
+    function makeSearchable(select) {
+        select.style.display = 'none';
+        const wrap = document.createElement('div');
+        wrap.className = 'relative ' + (select.name === 'customer' ? 'w-full sm:w-64' : 'w-full sm:w-56');
+        const input = document.createElement('input');
+        input.type = 'text';
+        input.autocomplete = 'off';
+        input.className = 'form-input py-3 w-full bg-[hsl(var(--background))] border border-[hsl(var(--border))] rounded-md text-sm';
+        const list = document.createElement('ul');
+        list.className = 'hidden absolute z-40 mt-1 w-full max-h-64 overflow-y-auto rounded-md border border-[hsl(var(--border))] bg-[hsl(var(--background))] shadow-lg text-sm';
+        wrap.append(input, list);
+        select.parentNode.insertBefore(wrap, select);
+
+        const options = Array.from(select.options).map(o => ({ value: o.value, label: o.text.trim() }));
+        const current = () => options.find(o => o.value === select.value) || options[0];
+        let active = -1;
+        let shown = [];
+
+        const label = () => current().value ? current().label : '';
+        const resetInput = () => { input.value = label(); input.placeholder = options[0].label; };
+
+        function render(filter) {
+            const q = (filter || '').toLowerCase();
+            shown = options.filter(o => !q || o.label.toLowerCase().startsWith(q));
+            list.innerHTML = '';
+            shown.forEach((o, i) => {
+                const li = document.createElement('li');
+                li.textContent = o.label;
+                li.className = 'px-3 py-2 cursor-pointer hover:bg-[hsl(var(--muted))]' + (o.value === select.value ? ' font-semibold' : '');
+                li.addEventListener('mousedown', e => { e.preventDefault(); choose(o); });
+                list.appendChild(li);
+            });
+            if (!shown.length) {
+                const li = document.createElement('li');
+                li.textContent = 'No matches';
+                li.className = 'px-3 py-2 text-[hsl(var(--muted-foreground))]';
+                list.appendChild(li);
+            }
+            active = -1;
+            list.classList.remove('hidden');
+        }
+
+        function highlight(i) {
+            const items = list.querySelectorAll('li');
+            items.forEach(li => li.classList.remove('bg-[hsl(var(--muted))]'));
+            if (shown.length && i >= 0 && i < shown.length) {
+                active = i;
+                items[i].classList.add('bg-[hsl(var(--muted))]');
+                items[i].scrollIntoView({ block: 'nearest' });
+            }
+        }
+
+        function choose(o) {
+            list.classList.add('hidden');
+            if (o.value === select.value) { resetInput(); return; }
+            select.value = o.value;
+            resetInput();
+            select.dispatchEvent(new Event('change'));
+        }
+
+        input.addEventListener('focus', () => { input.select(); render(''); });
+        input.addEventListener('input', () => render(input.value));
+        input.addEventListener('blur', () => { list.classList.add('hidden'); resetInput(); });
+        input.addEventListener('keydown', e => {
+            if (e.key === 'ArrowDown') { e.preventDefault(); highlight(Math.min(active + 1, shown.length - 1)); }
+            else if (e.key === 'ArrowUp') { e.preventDefault(); highlight(Math.max(active - 1, 0)); }
+            else if (e.key === 'Enter') {
+                e.preventDefault();
+                const pick = active >= 0 ? shown[active] : (shown.length === 1 ? shown[0] : null);
+                if (pick) choose(pick);
+            } else if (e.key === 'Escape') { list.classList.add('hidden'); input.blur(); }
+        });
+        resetInput();
+    }
+    document.querySelectorAll('#ledgerForm select[name="customer"], #ledgerForm select[name="sales_employee"]').forEach(makeSearchable);
 
     document.querySelectorAll('.export-button').forEach(button => {
         button.addEventListener('click', function() {
