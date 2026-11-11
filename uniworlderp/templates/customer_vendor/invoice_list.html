@@ -68,13 +68,13 @@
 
                 switch (index) {
                     case 0: // Invoice ID
-                        return parseInt(cellA) - parseInt(cellB) * multiplier;
+                        return (parseInt(cellA) - parseInt(cellB)) * multiplier;
                     case 1: // Customer
                         return cellA.localeCompare(cellB) * multiplier;
                     case 2: // Invoice Date
-                        return new Date(cellA) - new Date(cellB) * multiplier;
+                        return (new Date(cellA) - new Date(cellB)) * multiplier;
                     case 3: // Total Amount
-                        return parseFloat(cellA) - parseFloat(cellB) * multiplier;
+                        return (parseFloat(cellA) - parseFloat(cellB)) * multiplier;
                     case 4: // Status
                         return cellA.localeCompare(cellB) * multiplier;
                     default:

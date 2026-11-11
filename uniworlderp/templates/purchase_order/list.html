@@ -173,14 +173,14 @@
 
                 switch (index) {
                     case 1: // Order ID
-                        return parseInt(cellA) - parseInt(cellB) * multiplier;
+                        return (parseInt(cellA) - parseInt(cellB)) * multiplier;
                     case 2: // Vendor
                     case 5: // Status
                         return cellA.localeCompare(cellB) * multiplier;
                     case 3: // Order Date
-                        return new Date(cellA) - new Date(cellB) * multiplier;
+                        return (new Date(cellA) - new Date(cellB)) * multiplier;
                     case 4: // Total Amount
-                        return parseFloat(cellA.replace(/[^0-9.-]+/g,"")) - parseFloat(cellB.replace(/[^0-9.-]+/g,"")) * multiplier;
+                        return (parseFloat(cellA.replace(/[^0-9.-]+/g,"")) - parseFloat(cellB.replace(/[^0-9.-]+/g,""))) * multiplier;
                     default:
                         return 0;
                 }

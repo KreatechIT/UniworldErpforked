@@ -1077,7 +1077,7 @@ function exportFinanceReportExcel() {
 
                 switch (index) {
                     case 0: // Date
-                        return new Date(cellA).getTime() - new Date(cellB).getTime() * multiplier;
+                        return (new Date(cellA).getTime() - new Date(cellB).getTime()) * multiplier;
                     case 1: // Order ID
                         return (parseInt(cellA) - parseInt(cellB)) * multiplier;
                     case 2: // Customer Name

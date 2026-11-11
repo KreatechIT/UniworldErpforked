@@ -117,13 +117,13 @@
 
                 switch (index) {
                     case 1: // Purchase ID
-                        return parseInt(cellA) - parseInt(cellB) * multiplier;
+                        return (parseInt(cellA) - parseInt(cellB)) * multiplier;
                     case 2: // Vendor Name
                         return cellA.localeCompare(cellB) * multiplier;
                     case 3: // Purchase Date
-                        return new Date(cellA) - new Date(cellB) * multiplier;
+                        return (new Date(cellA) - new Date(cellB)) * multiplier;
                     case 4: // Total Amount
-                        return parseFloat(cellA) - parseFloat(cellB) * multiplier;
+                        return (parseFloat(cellA) - parseFloat(cellB)) * multiplier;
                     default:
                         return 0;
                 }

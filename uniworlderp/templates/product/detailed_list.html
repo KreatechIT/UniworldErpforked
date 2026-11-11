@@ -74,7 +74,7 @@
                     case 2: // Quantity
                     case 3: // Previous Stock
                     case 4: // Current Stock
-                        return parseInt(cellA, 10) - parseInt(cellB, 10) * multiplier;
+                        return (parseInt(cellA, 10) - parseInt(cellB, 10)) * multiplier;
                     default:
                         return 0;
                 }

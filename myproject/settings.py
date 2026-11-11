@@ -294,4 +294,4 @@ DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
 # }
 
 # Invoices and payments dated before this are ignored by the ledger; opening balances stand in for them.
-FINANCE_GO_LIVE_DATE = date(2026, 10, 13)
+FINANCE_GO_LIVE_DATE = date(2026, 11, 11)
