@@ -209,6 +209,13 @@ class ARInvoiceUpdateView(PermissionRequiredMixin, SuccessMessageMixin, UpdateVi
         messages.error(self.request, "You do not have permission to edit this invoice.")
         return redirect('customer_vendor:sales_order_list')
 
+    def dispatch(self, request, *args, **kwargs):
+        invoice = self.get_object()
+        if invoice.sales_order_id:
+            messages.error(request, f"This invoice follows Sales Order #{invoice.sales_order_id}. Edit the sales order and the invoice updates automatically.")
+            return redirect('customer_vendor:invoice_view', pk=invoice.pk)
+        return super().dispatch(request, *args, **kwargs)
+
     def get_context_data(self, **kwargs):
         context = super().get_context_data(**kwargs)
         if self.request.POST:

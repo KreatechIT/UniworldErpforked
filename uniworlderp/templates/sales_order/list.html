@@ -7,7 +7,6 @@
 <div class="bg-[hsl(var(--background))] rounded-lg shadow-lg overflow-hidden border border-[hsl(var(--border))]">
     <div class="p-6">
         <div class="flex flex-col lg:flex-row lg:flex-wrap justify-between items-start lg:items-center mb-4 gap-4">
-            <!-- Add New Sales Order and Sales Order Detailed List Buttons -->
             <div class="flex flex-wrap items-center gap-2 w-full sm:w-auto">
                 <a href="{% url 'customer_vendor:sales_order_create' %}" class="px-4 py-3 bg-gradient-to-br from-[#a31319] to-black text-white rounded-md hover:bg-opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[hsl(var(--ring))] text-sm whitespace-nowrap">
                     <i class="ri-add-line mr-1"></i> Add
@@ -17,7 +16,6 @@
                 </a>
             </div>
         
-            <!-- Search + Filter Form -->
             <form method="get" action="{% url 'customer_vendor:sales_order_list' %}" class="flex flex-wrap items-center gap-2 w-full sm:w-auto mt-4 sm:mt-0">
                 <div class="relative w-full sm:w-auto">
                     <input type="text" name="search" placeholder="Search sales orders..." class="pl-10 pr-4 py-3 border border-[hsl(var(--border))] rounded-md focus:ring-indigo-500 focus:border-indigo-500 block w-full sm:w-56 sm:text-sm bg-[hsl(var(--background))]" value="{{ request.GET.search }}">
@@ -97,7 +95,7 @@
                                     <td class="px-6 py-4 whitespace-nowrap">{{ sales_order.get_delivery_status_display }}</td>
                                     <td class="px-6 py-4 whitespace-nowrap">
                                         <div class="flex space-x-2">
-                                            {% if perms.uniworlderp.change_salesorder and sales_order.status == 'draft' %}
+                                            {% if perms.uniworlderp.change_salesorder and sales_order.is_editable %}
                                             <a href="{% url 'customer_vendor:sales_order_update' sales_order.pk %}"
                                                class="px-2 py-1 text-xs font-semibold rounded-full bg-indigo-800 text-indigo-100 hover:bg-indigo-700">
                                                 <i class="ri-edit-line mr-1"></i>Edit
@@ -203,7 +201,6 @@
 
 {% block extra_js %}
 <script>
-    // Table sorting functionality
     document.addEventListener('DOMContentLoaded', function() {
         const table = document.getElementById('salesOrderTable');
         const headers = table.querySelectorAll('th');
@@ -222,15 +219,15 @@
                 const cellB = rowB.querySelectorAll('td')[index].textContent.trim();
 
                 switch (index) {
-                    case 0: // Order ID
+                    case 0:
                         return (parseInt(cellA) - parseInt(cellB)) * multiplier;
-                    case 1: // Order Date
+                    case 1:
                         return (new Date(cellA) - new Date(cellB)) * multiplier;
-                    case 2: // Customer
-                    case 4: // Order Status
-                    case 5: // Delivery
+                    case 2:
+                    case 4:
+                    case 5:
                         return cellA.localeCompare(cellB) * multiplier;
-                    case 3: // Total Amount
+                    case 3:
                         return (parseFloat(cellA) - parseFloat(cellB)) * multiplier;
                     default:
                         return 0;

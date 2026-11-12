@@ -267,6 +267,22 @@ class SalesOrder(models.Model):
     def __str__(self):
         return f"SalesOrder #{self.id} - {self.customer.name}"
 
+    @property
+    def has_payments(self):
+        return Payment.objects.filter(invoice__sales_order=self).exists()
+
+    @property
+    def has_returns(self):
+        return ReturnSalesItem.objects.filter(sales_order_item__sales_order=self).exists()
+
+    @property
+    def is_editable(self):
+        if self.status == 'draft':
+            return True
+        if self.status == 'confirmed':
+            return not (self.has_payments or self.has_returns)
+        return False
+
     def update_total_amount(self):
         subtotal = sum(item.total for item in self.order_items.all())
         self.total_amount = subtotal - self.discount + self.shipping

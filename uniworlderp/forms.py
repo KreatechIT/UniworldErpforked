@@ -34,7 +34,6 @@ FILE_UPLOAD_CLASSES = (
 )
 
 class BaseStyleForm(forms.ModelForm):
-    """Base form class with common styling functionality"""
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.apply_base_styles()
@@ -47,7 +46,6 @@ class BaseStyleForm(forms.ModelForm):
                 field.widget.attrs.update({'class': BASE_FIELD_CLASSES})
 
 class BaseOrderItemForm(BaseStyleForm):
-    """Base form for order items with common functionality"""
     display_total = forms.DecimalField(
         label='Total',
         disabled=True,
@@ -99,7 +97,6 @@ class CustomerVendorForm(BaseStyleForm):
         self.fields['area'].choices = [('', '---------')] + get_area_choices()
 
     def clean_phone_number(self):
-        """Validate phone_number field to ensure it's provided"""
         phone_number = self.cleaned_data.get('phone_number')
         if not phone_number or phone_number.strip() == '':
             raise ValidationError('Phone number is required for all customers and vendors.')
@@ -111,7 +108,6 @@ class CustomerVendorForm(BaseStyleForm):
         return phone_number
 
     def clean_business_type(self):
-        """Validate business_type field selection"""
         business_type = self.cleaned_data.get('business_type')
         if not business_type:
             raise ValidationError('Please select a business type.')
@@ -123,7 +119,6 @@ class CustomerVendorForm(BaseStyleForm):
         return business_type
 
     def clean(self):
-        """Additional form-level validation"""
         cleaned_data = super().clean()
         phone_number = cleaned_data.get('phone_number')
         business_type = cleaned_data.get('business_type')
@@ -180,7 +175,6 @@ class ProductForm(BaseStyleForm):
                 self.fields[field_name].widget.attrs['placeholder'] = placeholder
 
     def set_field_labels(self):
-        """Set field labels to use the verbose names from the model"""
         field_labels = {
             'sku': 'Product Code',
             'name': 'Product Name', 
@@ -200,7 +194,6 @@ class ProductForm(BaseStyleForm):
                 return unique_sku
 
     def clean_unit(self):
-        """Validate unit field selection"""
         unit = self.cleaned_data.get('unit')
         if not unit:
             raise ValidationError("Unit selection is required.")
@@ -342,6 +335,10 @@ class SalesOrderItemForm(forms.ModelForm):
     def __init__(self, *args, **kwargs):
         super().__init__(*args, **kwargs)
         self.fields['product'].label_from_instance = lambda obj: f"{obj.name} - {obj.sku}"
+
+    def has_changed(self):
+        computed = {'stock_quantity', 'display_total', 'total_discount', 'DELETE'}
+        return bool(set(self.changed_data) - computed)
 
     def clean_product(self):
         product = self.cleaned_data.get('product')
@@ -674,7 +671,6 @@ def get_return_sales_item_formset(sales_order=None, **kwargs):
 
 
 class StockReportForm(forms.Form):
-    """Form for stock report filtering with strict date validation"""
     
     DATE_RANGE_CHOICES = [
         ('today', 'Today'),

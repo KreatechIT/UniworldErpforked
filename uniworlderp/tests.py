@@ -1,3 +1,4 @@
+from django.test import override_settings
 from datetime import date, timedelta
 from decimal import Decimal
 from io import StringIO
@@ -923,6 +924,7 @@ class PaymentTests(CustomerEmployeeAssignmentBase):
         self.assertEqual(resp.status_code, 403)
 
 
+@override_settings(FINANCE_GO_LIVE_DATE=date(2000, 1, 1))
 class LedgerTests(CustomerEmployeeAssignmentBase):
 
     @classmethod
@@ -986,6 +988,19 @@ class LedgerTests(CustomerEmployeeAssignmentBase):
         self.assertEqual(ledger['brought_forward'], Decimal('500.00'))
         self.assertEqual(ledger['rows'][0]['balance'], Decimal('700.00'))
         self.assertEqual(ledger['closing_balance'], Decimal('700.00'))
+
+    def test_ledger_ignores_invoices_before_go_live_date(self):
+        CustomerVendor.objects.filter(pk=self.c1a.pk).update(opening_balance=Decimal('500.00'))
+        self.make_confirmed_invoice(self.c1a, self.emp1, quantity=2, unit_price=Decimal('100.00'), order_date=date(2026, 1, 5))
+        self.client.force_login(self.admin)
+        with override_settings(FINANCE_GO_LIVE_DATE=date(2026, 2, 1)):
+            resp = self.client.get(reverse('customer_vendor:ledger'), {
+                'customer': str(self.c1a.pk), 'preset': 'range',
+                'start_date': '2026-01-01', 'end_date': '2026-03-31',
+            })
+        ledger = resp.context['ledger']
+        self.assertEqual(ledger['rows'], [])
+        self.assertEqual(ledger['closing_balance'], Decimal('500.00'))
 
     def test_opening_balance_can_be_set_from_ledger(self):
         self.client.force_login(self.admin)

@@ -55,6 +55,17 @@ def confirm_sales_order(order):
     create_invoice_from_order(order)
 
 
+def _copy_order_items_to_invoice(order, invoice):
+    for item in order.order_items.all():
+        effective_unit_price = (item.total / item.quantity) if item.quantity else item.unit_price
+        ARInvoiceItem.objects.create(
+            ar_invoice=invoice,
+            product=item.product,
+            unit_price=effective_unit_price,
+            quantity=item.quantity,
+        )
+
+
 def create_invoice_from_order(order):
     if ARInvoice.objects.filter(sales_order=order).exists():
         return
@@ -74,17 +85,70 @@ def create_invoice_from_order(order):
         owner=order.owner,
     )
 
-    for item in order.order_items.all():
-        effective_unit_price = (item.total / item.quantity) if item.quantity else item.unit_price
-        ARInvoiceItem.objects.create(
-            ar_invoice=invoice,
-            product=item.product,
-            unit_price=effective_unit_price,
-            quantity=item.quantity,
-        )
-
+    _copy_order_items_to_invoice(order, invoice)
     invoice.save()
     return invoice
+
+
+def order_quantities(order):
+    quantities = {}
+    for item in order.order_items.all():
+        quantities[item.product_id] = quantities.get(item.product_id, 0) + item.quantity
+    return quantities
+
+
+def apply_confirmed_order_changes(order, old_quantities):
+    if order.has_payments or order.has_returns:
+        raise ValidationError("A payment or return was recorded on this order in the meantime, so it can no longer be edited.")
+
+    new_quantities = order_quantities(order)
+    differences = {
+        product_id: new_quantities.get(product_id, 0) - old_quantities.get(product_id, 0)
+        for product_id in set(old_quantities) | set(new_quantities)
+    }
+    differences = {product_id: diff for product_id, diff in differences.items() if diff}
+
+    products = {p.id: p for p in Product.objects.select_for_update().filter(id__in=differences.keys())}
+    shortages = [
+        f"{products[pid].name}: only {products[pid].stock_quantity} in stock, but {diff} more needed"
+        for pid, diff in differences.items()
+        if diff > 0 and products[pid].stock_quantity < diff
+    ]
+    if shortages:
+        raise ValidationError("Can't save - not enough stock: " + "; ".join(shortages))
+
+    for pid, diff in differences.items():
+        StockTransaction.objects.create(
+            product=products[pid],
+            transaction_type='OUT' if diff > 0 else 'RET',
+            quantity=abs(diff),
+            reference=f"SO-{order.id}-Edit",
+            owner=order.owner,
+        )
+
+    sync_invoice_from_order(order)
+
+
+def sync_invoice_from_order(order):
+    invoice = ARInvoice.objects.filter(sales_order=order).first()
+    if invoice is None:
+        return create_invoice_from_order(order)
+
+    order_date = order.order_date
+    if hasattr(order_date, 'date'):
+        order_date = order_date.date()
+
+    invoice.customer = order.customer
+    invoice.sales_employee = order.sales_employee
+    invoice.invoice_date = order_date
+    invoice.due_date = order_date + timedelta(days=30)
+    invoice.discount = order.discount
+    invoice.shipping = order.shipping
+    invoice.invoice_items.all().delete()
+    _copy_order_items_to_invoice(order, invoice)
+    invoice.save()
+    return invoice
+
 
 class SalesOrderListView(ListView):
     model = SalesOrder
@@ -275,8 +339,12 @@ class SalesOrderUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateVi
 
     def dispatch(self, request, *args, **kwargs):
         self.object = self.get_object()
-        if self.object.status != 'draft':
-            messages.error(request, f"This order is {self.object.get_status_display().lower()} and locked. It can't be edited.")
+        if not self.object.is_editable:
+            if self.object.status == 'confirmed':
+                reason = "a payment has been recorded on its invoice" if self.object.has_payments else "a sales return has been made against it"
+                messages.error(request, f"This order is locked because {reason}. It can't be edited.")
+            else:
+                messages.error(request, f"This order is {self.object.get_status_display().lower()} and locked. It can't be edited.")
             return redirect('customer_vendor:sales_order_view', pk=self.object.pk)
         return super().dispatch(request, *args, **kwargs)
 
@@ -304,18 +372,33 @@ class SalesOrderUpdateView(LoginRequiredMixin, PermissionRequiredMixin, UpdateVi
         formset = context['formset']
 
         if formset.is_valid():
-            self.object = form.save()
-            formset.instance = self.object
-            items = formset.save(commit=False)
+            was_confirmed = self.object.status == 'confirmed'
+            old_quantities = order_quantities(self.object) if was_confirmed else None
 
-            for item in formset.deleted_objects:
-                if item.pk:
-                    item.delete()
+            try:
+                with transaction.atomic():
+                    self.object = form.save()
+                    formset.instance = self.object
+                    items = formset.save(commit=False)
 
-            for item in items:
-                item.save()
+                    for item in formset.deleted_objects:
+                        if item.pk:
+                            item.delete()
 
-            if self.request.POST.get('action') == 'confirm':
+                    for item in items:
+                        item.save()
+
+                    self.object.update_total_amount()
+
+                    if was_confirmed:
+                        apply_confirmed_order_changes(self.object, old_quantities)
+            except ValidationError as e:
+                messages.error(self.request, ', '.join(e.messages))
+                return self.form_invalid(form)
+
+            if was_confirmed:
+                messages.success(self.request, 'Sales Order updated. Stock and invoice were adjusted to match.')
+            elif self.request.POST.get('action') == 'confirm':
                 try:
                     confirm_sales_order(self.object)
                     messages.success(self.request, 'Sales Order confirmed successfully.')

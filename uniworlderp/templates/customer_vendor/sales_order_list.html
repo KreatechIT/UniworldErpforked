@@ -32,7 +32,7 @@
                                     <td class="px-6 py-4">{{ order.get_status_display }}</td>
                                     <td class="px-6 py-4 whitespace-nowrap">
                                         <div class="flex space-x-2">
-                                            {% if perms.uniworlderp.change_salesorder and order.status == 'draft' %}
+                                            {% if perms.uniworlderp.change_salesorder and order.is_editable %}
                                             <a href="{% url 'customer_vendor:sales_order_update' order.pk %}"
                                                class="px-2 py-1 text-xs font-semibold rounded-full bg-indigo-800 text-indigo-100 hover:bg-indigo-700">
                                                 <i class="ri-edit-line mr-1"></i>Edit
@@ -83,7 +83,6 @@
 
 {% block extra_js %}
 <script>
-    // Table sorting functionality
     document.addEventListener('DOMContentLoaded', function() {
         const table = document.getElementById('salesOrderTable');
         const headers = table.querySelectorAll('th');
@@ -102,15 +101,15 @@
                 const cellB = rowB.querySelectorAll('td')[index].textContent.trim();
 
                 switch (index) {
-                    case 0: // Order ID
+                    case 0:
                         return (parseInt(cellA) - parseInt(cellB)) * multiplier;
-                    case 1: // Customer
+                    case 1:
                         return cellA.localeCompare(cellB) * multiplier;
-                    case 2: // Order Date
+                    case 2:
                         return (new Date(cellA) - new Date(cellB)) * multiplier;
-                    case 3: // Total Amount
+                    case 3:
                         return (parseFloat(cellA) - parseFloat(cellB)) * multiplier;
-                    case 4: // Status
+                    case 4:
                         return cellA.localeCompare(cellB) * multiplier;
                     default:
                         return 0;
@@ -127,7 +126,6 @@
         };
 
         [].forEach.call(headers, (header, index) => {
-            // Only make the first 5 columns sortable (excluding Actions column)
             if (index < 5) {
                 header.addEventListener('click', () => {
                     sortColumn(index);

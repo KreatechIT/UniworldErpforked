@@ -4,14 +4,16 @@
 {% block main_content %}
 <div class="min-h-screen p-4">
     <div class="w-full">
-        <!-- Card Container -->
         <div class="bg-white bg-opacity-10 backdrop-filter backdrop-blur-lg rounded-lg shadow-xl overflow-hidden border border-white border-opacity-20">
-            <!-- Card Header -->
             <div class="bg-gradient-to-br from-[#a31319] to-black text-white px-6 py-4 flex items-center justify-between">
                 <h2 class="text-xl font-semibold text-white">Sales Order</h2>
                 {% if object %}
                     {% if object.status == 'confirmed' %}
-                        <span class="px-3 py-1 text-xs font-semibold rounded-full bg-green-800 text-green-100">Confirmed - locked, can't be edited or deleted</span>
+                        {% if object.is_editable %}
+                        <span class="px-3 py-1 text-xs font-semibold rounded-full bg-green-800 text-green-100">Confirmed - editable until a payment is recorded</span>
+                        {% else %}
+                        <span class="px-3 py-1 text-xs font-semibold rounded-full bg-green-800 text-green-100">Confirmed - locked (payment or return recorded)</span>
+                        {% endif %}
                     {% elif object.status == 'cancelled' %}
                         <span class="px-3 py-1 text-xs font-semibold rounded-full bg-red-900 text-red-100">Cancelled</span>
                     {% else %}
@@ -20,7 +22,6 @@
                 {% endif %}
             </div>
 
-            <!-- Card Content -->
             <div class="p-6 space-y-6">
                 <form method="post" enctype="multipart/form-data" class="space-y-6"
                       data-restrict-customers="{% if form.restrict_customers %}true{% else %}false{% endif %}">
@@ -180,7 +181,6 @@
                         </div>
 
                         {% if action != 'View' %}
-                        <!-- Single Add Row Button that works for both mobile and desktop -->
                         <div class="mt-4">
                             <button type="button" id="addRowBtn" class="w-full px-4 py-2 bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] rounded-full hover:bg-opacity-90 focus:outline-none focus:ring-2 focus:ring-offset-2 focus:ring-[hsl(var(--ring))]">
                                 <span class="mr-2">+</span> Add New Row
@@ -189,7 +189,6 @@
                         {% endif %}
                     </div>
 
-                    <!-- Financial Information Section -->
                     <div class="w-full p-4 border border-[hsl(var(--border))] rounded-xl bg-[hsl(var(--background))] shadow-lg mt-6">
                         <h3 class="text-lg font-semibold mb-4">Financial Information</h3>
                         <div class="grid grid-cols-2 gap-4">
@@ -217,16 +216,18 @@
                                     <span id="finalTotal" class="text-lg font-bold text-[hsl(var(--primary))]">$0.00</span>
                                 </div>
                             </div>
-<!-- Removed calculation text -->
                         </div>
                     </div>
 
-                    <!-- Submit Button -->
                     <div class="flex justify-end space-x-4 mt-6">
                         <button type="button" onclick="history.back()" class="px-6 py-2 bg-gray-500 text-white rounded-lg hover:bg-gray-600">
                             {% if action == 'View' %}Back{% else %}Cancel{% endif %}
                         </button>
-                        {% if action != 'View' %}
+                        {% if action != 'View' and object.status == 'confirmed' %}
+                        <button type="submit" name="action" value="save" data-confirm-message="This will update the invoice and adjust stock to match your changes. Continue?" class="px-6 py-2 bg-green-700 text-white rounded-lg hover:bg-green-800">
+                            Save Changes
+                        </button>
+                        {% elif action != 'View' %}
                         <button type="submit" name="action" value="draft" class="px-6 py-2 bg-[hsl(var(--primary))] text-[hsl(var(--primary-foreground))] rounded-lg hover:bg-opacity-90">
                             Save as Draft
                         </button>
@@ -267,7 +268,6 @@
     </div>
 </div>
 
-<!-- Context Menu -->
 <div id="contextMenu" class="hidden fixed bg-white border border-gray-300 rounded-lg shadow-lg z-50">
     <button type="button" id="addRowAboveBtn" class="block w-full text-left px-4 py-2 hover:bg-gray-100">Add Row Above</button>
     <button type="button" id="addRowBelowBtn" class="block w-full text-left px-4 py-2 hover:bg-gray-100">Add Row Below</button>
@@ -283,9 +283,8 @@
     const addRowBtn = document.getElementById('addRowBtn');
     const contextMenu = document.getElementById('contextMenu');
     let targetRow = null;
-    let deletedRows = new Set(); // Track deleted rows
+    let deletedRows = new Set();
 
-    // Set current date for the order_date field
     const orderDateField = document.getElementById('id_order_date');
     if (orderDateField) {
         const today = new Date();
@@ -295,14 +294,10 @@
         orderDateField.value = `${year}-${month}-${day}`;
     }
 
-    // Initialize searchable dropdown only for product fields (skipped in read-only View
-    // mode - the custom dropdown lets a user click a new value regardless of the native
-    // select's disabled attribute, so it must not be wired up when the order is locked)
     if (!isViewMode) {
         initializeSearchableDropdowns();
     }
 
-    // Non-admin users: only show customers assigned to the selected sales employee
     const restrictCustomers = document.querySelector('form[data-restrict-customers]')?.dataset.restrictCustomers === 'true';
     const employeeSelect = document.getElementById('id_sales_employee');
     const customerSelectEl = document.getElementById('id_customer');
@@ -315,11 +310,9 @@
 
         optionDivs.forEach(div => {
             const matches = employeeId && div.dataset.employee === employeeId;
-            // 'hidden' class is separate from the search box's inline display style
             div.classList.toggle('hidden', !matches);
         });
 
-        // Clear the customer if it doesn't belong to the chosen employee
         const selected = customerSelectEl.options[customerSelectEl.selectedIndex];
         if (clearInvalid && selected && selected.value && selected.dataset.employee !== employeeId) {
             customerSelectEl.value = '';
@@ -330,19 +323,13 @@
     if (employeeSelect) {
         employeeSelect.addEventListener('change', () => filterCustomersByEmployee(true));
     }
-    // On load, keep an existing order's customer as-is
     filterCustomersByEmployee(false);
 
-    // Add/delete row and the right-click context menu are edit-only actions - none of
-    // this should be wired up in read-only View mode (a confirmed/cancelled order can't
-    // be touched, and these controls act on the DOM directly regardless of disabled inputs)
     if (!isViewMode) {
-    // Add row functionality
     if (addRowBtn) {
         addRowBtn.addEventListener('click', () => addFormsetRow());
     }
 
-    // Delete row functionality
     orderItemsFormset.addEventListener('click', function(e) {
         if (e.target.closest('.delete-row')) {
             const row = e.target.closest('.formset-row');
@@ -350,7 +337,6 @@
         }
     });
 
-    // Context menu functionality
     orderItemsFormset.addEventListener('contextmenu', showContextMenu);
     document.addEventListener('click', hideContextMenu);
 
@@ -376,17 +362,14 @@
     });
     }
 
-    // Calculate total on input change
     orderItemsFormset.addEventListener('input', function(e) {
         if (e.target.name.includes('quantity') || e.target.name.includes('unit_price')) {
             const row = e.target.closest('tr');
             
-            // If quantity changed, recalculate total discount based on unit discount
             if (e.target.name.includes('quantity')) {
                 const quantity = parseFloat(e.target.value) || 0;
                 const discountField = row.querySelector('input[name$="total_discount"]');
                 
-                // Get unit discount from the product (stored when product was selected)
                 const unitDiscount = parseFloat(row.dataset.unitDiscount) || 0;
                 if (discountField) {
                     discountField.value = (quantity * unitDiscount).toFixed(2);
@@ -398,14 +381,12 @@
         }
     });
 
-    // Product selection change event
     orderItemsFormset.addEventListener('change', function(e) {
         if (e.target.name.includes('product')) {
             updateProductDetails(e.target);
         }
     });
 
-    // Listen for discount and shipping changes
     const discountField = document.getElementById('id_discount');
     const shippingField = document.getElementById('id_shipping');
     
@@ -417,17 +398,14 @@
     }
 
     function initializeSearchableDropdowns() {
-        // ONLY initialize product dropdowns, not all select fields
         const productSelects = orderItemsFormset.querySelectorAll('select[name$="product"]');
         productSelects.forEach(createSearchableDropdown);
         
-        // Initialize customer dropdown if needed (but not delivery status)
         const customerSelect = document.querySelector('select[id="id_customer"]');
         if (customerSelect) {
             createSearchableDropdown(customerSelect);
         }
         
-        // Initialize salesperson dropdown if needed
         const salespersonSelect = document.querySelector('select[id="id_salesperson"]');
         if (salespersonSelect) {
             createSearchableDropdown(salespersonSelect);
@@ -435,29 +413,23 @@
     }
 
     function createSearchableDropdown(select) {
-        // Check if this select already has a dropdown
         if (select.nextSibling && select.nextSibling.classList && select.nextSibling.classList.contains('dropdown-wrapper')) {
             return;
         }
         
-        // Determine if this is a product select
         const isProductSelect = select.name && select.name.includes('product');
         
-        // Create wrapper container
         const wrapper = document.createElement('div');
         wrapper.className = 'relative dropdown-wrapper w-full';
         
-        // Create button that shows/hides the dropdown
         const button = document.createElement('button');
         button.type = 'button';
         button.className = 'form-input text-left w-full flex justify-between items-center';
         
-        // Create span for selected text
         const selectedText = document.createElement('span');
         selectedText.className = 'selected-text';
         selectedText.textContent = select.options[select.selectedIndex]?.text || 'Select...';
         
-        // Add arrow icon
         const arrow = document.createElement('span');
         arrow.innerHTML = '▼';
         arrow.className = 'text-xs';
@@ -465,18 +437,15 @@
         button.appendChild(selectedText);
         button.appendChild(arrow);
         
-        // Create dropdown container
         const dropdown = document.createElement('div');
         
-        // Special positioning for product selects inside table cells
         if (isProductSelect) {
             dropdown.className = 'fixed bg-white border border-gray-300 rounded-md shadow-lg z-50 max-h-60 overflow-y-auto hidden';
-            dropdown.style.width = '300px'; // Fixed width for product dropdown
+            dropdown.style.width = '300px';
         } else {
             dropdown.className = 'absolute left-0 right-0 mt-1 bg-white border border-gray-300 rounded-md shadow-lg z-50 max-h-60 overflow-y-auto hidden';
         }
         
-        // Create search input
         const searchContainer = document.createElement('div');
         searchContainer.className = 'p-2 sticky top-0 bg-white border-b';
         
@@ -488,13 +457,11 @@
         searchContainer.appendChild(searchInput);
         dropdown.appendChild(searchContainer);
         
-        // Create options list
         const optionsList = document.createElement('div');
         optionsList.className = 'py-1';
         
-        // Add options from the original select
         Array.from(select.options).forEach(option => {
-            if (option.value) { // Skip empty options
+            if (option.value) {
                 const optionElement = document.createElement('div');
                 optionElement.className = 'px-4 py-2 hover:bg-gray-100 cursor-pointer';
                 optionElement.dataset.value = option.value;
@@ -509,7 +476,6 @@
                     selectedText.textContent = option.text;
                     dropdown.classList.add('hidden');
                     
-                    // Dispatch change event to trigger any listeners
                     select.dispatchEvent(new Event('change', { bubbles: true }));
                 });
                 
@@ -519,11 +485,9 @@
         
         dropdown.appendChild(optionsList);
         
-        // Add button click handler
         button.addEventListener('click', (e) => {
             e.preventDefault();
             
-            // For product selects, position the dropdown at the button
             if (isProductSelect) {
                 const rect = button.getBoundingClientRect();
                 dropdown.style.top = rect.bottom + 'px';
@@ -534,14 +498,12 @@
             if (!dropdown.classList.contains('hidden')) {
                 searchInput.focus();
                 
-                // Close any other open dropdowns
                 document.querySelectorAll('.dropdown-wrapper .absolute, .dropdown-wrapper .fixed').forEach(el => {
                     if (el !== dropdown) el.classList.add('hidden');
                 });
             }
         });
         
-        // Add search functionality
         searchInput.addEventListener('input', () => {
             const searchTerm = searchInput.value.toLowerCase();
             Array.from(optionsList.children).forEach(option => {
@@ -550,28 +512,23 @@
             });
         });
         
-        // Close dropdown when clicking outside
         document.addEventListener('click', (e) => {
             if (!wrapper.contains(e.target) && !dropdown.contains(e.target)) {
                 dropdown.classList.add('hidden');
             }
         });
         
-        // Insert the custom dropdown after the select
         wrapper.appendChild(button);
         
-        // For product selects, append the dropdown to the body
         if (isProductSelect) {
             document.body.appendChild(dropdown);
         } else {
             wrapper.appendChild(dropdown);
         }
         
-        // Hide the original select and insert our custom dropdown
         select.style.display = 'none';
         select.parentNode.insertBefore(wrapper, select.nextSibling);
         
-        // Ensure the dropdown is updated when the original select changes
         select.addEventListener('change', () => {
             selectedText.textContent = select.options[select.selectedIndex]?.text || 'Select...';
         });
@@ -584,39 +541,32 @@
         if (templateRow) {
             const newRow = templateRow.cloneNode(true);
             
-            // Remove any existing custom dropdowns from the new row
             const existingDropdowns = newRow.querySelectorAll('.dropdown-wrapper');
             existingDropdowns.forEach(dropdown => dropdown.remove());
             
-            // Update indices in the new row
             newRow.innerHTML = newRow.innerHTML.replace(/-(\d+)-/g, `-${newIndex}-`);
             
-            // Clear input values and update names/ids
             newRow.querySelectorAll('input, select').forEach(input => {
                 if (input.tagName === 'SELECT') {
-                    // Preserve the original options
                     const originalSelect = templateRow.querySelector(`select[name$="${input.name.split('-').pop()}"]`);
                     input.innerHTML = originalSelect.innerHTML;
-                    input.value = ''; // Clear selection
-                    input.style.display = ''; // Make sure select is visible
+                    input.value = '';
+                    input.style.display = '';
                 } else {
                     input.value = '';
                 }
                 
-                // Update name and id attributes
                 const oldName = input.name;
                 const oldId = input.id;
                 input.name = oldName.replace(/-\d+-/, `-${newIndex}-`);
                 input.id = oldId ? oldId.replace(/-\d+-/, `-${newIndex}-`) : '';
             });
             
-            // Reset delete checkbox
             const deleteCheckbox = newRow.querySelector('input[name$="-DELETE"]');
             if (deleteCheckbox) {
                 deleteCheckbox.checked = false;
             }
             
-            // Show the new row
             newRow.style.display = '';
             
             if (referenceRow && position === 'above') {
@@ -630,7 +580,6 @@
             totalForms.value = newIndex + 1;
             updateFormsetIndexes();
             
-            // Initialize searchable dropdown for the new row's product select only
             const newProductSelect = newRow.querySelector('select[name$="product"]');
             if (newProductSelect) {
                 createSearchableDropdown(newProductSelect);
@@ -639,12 +588,10 @@
     }
 
     function deleteRow(row) {
-        // Check if we have more than one row before deletion
         const visibleRows = Array.from(orderItemsFormset.querySelectorAll('.formset-row')).filter(
             r => r.style.display !== 'none'
         );
         
-        // Add row ID to our deleted rows tracker
         const rowId = row.querySelector('input[type="hidden"][name$="-id"]')?.value;
         if (rowId) {
             deletedRows.add(rowId);
@@ -658,28 +605,22 @@
             row.remove();
         }
         
-        // Ensure at least one row is visible
         if (visibleRows.length <= 1) {
             addFormsetRow();
         }
         
         updateFormsetIndexes();
         
-        // Update order totals after deleting a row
         updateOrderTotals();
     }
 
     function updateFormsetIndexes() {
-        // Get ALL rows (including hidden/deleted ones)
         const allRows = Array.from(orderItemsFormset.querySelectorAll('.formset-row'));
         
         const totalForms = document.querySelector('[name$="-TOTAL_FORMS"]');
         if (totalForms) {
-            // IMPORTANT: TOTAL_FORMS must include ALL rows, even hidden/deleted ones
-            // Django formsets need to know about deleted items to process them
             totalForms.value = allRows.length;
             
-            // Check if we have at least one visible row
             const visibleRows = allRows.filter(row => row.style.display !== 'none');
             if (visibleRows.length === 0) {
                 addFormsetRow();
@@ -708,11 +649,9 @@
             const quantity = parseFloat(row.querySelector('input[name$="quantity"]').value) || 0;
             const unitPrice = parseFloat(row.querySelector('input[name$="unit_price"]').value) || 0;
             
-            // Get total discount (already calculated as quantity * unit_discount from API)
             const discountField = row.querySelector('input[name$="total_discount"]');
             const totalDiscount = discountField ? (parseFloat(discountField.value) || 0) : 0;
             
-            // Calculate total: (quantity * unitPrice) - totalDiscount
             const totalBeforeDiscount = quantity * unitPrice;
             const totalAfterDiscount = totalBeforeDiscount - totalDiscount;
             
@@ -728,7 +667,7 @@
         let subtotal = 0;
 
         rows.forEach(row => {
-            if (row.style.display !== 'none') { // Only calculate for visible rows
+            if (row.style.display !== 'none') {
                 const totalInput = row.querySelector('input[name$="display_total"]');
                 subtotal += parseFloat(totalInput.value) || 0;
             }
@@ -743,15 +682,13 @@
         document.getElementById('finalTotal').innerText = `$${total.toFixed(2)}`;
     }
 
-    function updateProductDetails(productSelect) {
+    function updateProductDetails(productSelect, preserveSavedValues = false) {
         const row = productSelect.closest('tr');
         let sku;
         
-        // Handle both original select and custom dropdown
         if (productSelect.tagName === 'SELECT') {
             sku = productSelect.options[productSelect.selectedIndex]?.getAttribute('sku');
         } else {
-            // For custom dropdown, get the data from the selected option
             const selectedValue = productSelect.value;
             const originalSelect = row.querySelector('select[name$="product"]');
             const selectedOption = Array.from(originalSelect.options).find(opt => opt.value === selectedValue);
@@ -759,7 +696,6 @@
         }
     
         if (sku) {
-            // Dynamically generate the URL using Django's reverse function in the template
             const fetchUrl = `{% url 'customer_vendor:get_product_info' %}?sku=${sku}`;
     
             return fetch(fetchUrl)
@@ -770,14 +706,13 @@
                     return response.json();
                 })
                 .then(data => {
-                    // Store unit discount in row dataset for later calculations
                     row.dataset.unitDiscount = data.discount_amount || 0;
                     
-                    // Update fields with the fetched product data
                     row.querySelector('input[name$="stock_quantity"]').value = data.stock_quantity;
-                    row.querySelector('input[name$="unit_price"]').value = data.price.toFixed(2);
+                    if (!preserveSavedValues) {
+                        row.querySelector('input[name$="unit_price"]').value = data.price.toFixed(2);
+                    }
                     
-                    // Handle quantity - set to 1 if empty (FIX ISSUE 8)
                     const quantityInput = row.querySelector('input[name$="quantity"]');
                     let quantity = parseFloat(quantityInput.value) || 0;
                     if (quantity === 0) {
@@ -788,13 +723,11 @@
                     if ('discount_amount' in data) {
                         const discountField = row.querySelector('input[name$="total_discount"]');
                         if (discountField) {
-                            // Calculate total discount = quantity * unit discount
                             const totalDiscount = quantity * data.discount_amount;
                             discountField.value = totalDiscount.toFixed(2);
                         }
                     }
     
-                    // Call the function to update the total
                     updateTotal({ target: quantityInput });
                     updateOrderTotals();
                 })
@@ -802,12 +735,10 @@
                     console.error('Error fetching product info:', error);
                 });
         } else {
-            // Reset fields if no product SKU is selected
             row.querySelector('input[name$="stock_quantity"]').value = '';
             row.querySelector('input[name$="unit_price"]').value = '';
             row.querySelector('input[name$="display_total"]').value = '';
             
-            // Also reset discount and dataset
             const discountField = row.querySelector('input[name$="total_discount"]');
             if (discountField) {
                 discountField.value = '';
@@ -818,11 +749,9 @@
         }
     }
     
-    // Initialize totals for existing rows (FIX ISSUE 7 - Race Condition)
     const initPromises = [];
     
     document.querySelectorAll('.formset-row').forEach(row => {
-        // Skip initialization for deleted rows
         const rowId = row.querySelector('input[type="hidden"][name$="-id"]')?.value;
         if (rowId && deletedRows.has(rowId)) {
             return;
@@ -830,14 +759,11 @@
         
         const productSelect = row.querySelector('select[name$="product"]');
         if (productSelect && productSelect.value) {
-            // For existing rows with products, fetch product details to ensure all fields are populated
-            // Store the promise so we can wait for all to complete
-            const promise = updateProductDetails(productSelect);
+            const promise = updateProductDetails(productSelect, true);
             if (promise) {
                 initPromises.push(promise);
             }
         } else {
-            // For new/empty rows, just calculate based on existing values
             const quantity = parseFloat(row.querySelector('input[name$="quantity"]').value) || 0;
             const unitPrice = parseFloat(row.querySelector('input[name$="unit_price"]').value) || 0;
             const totalDiscount = parseFloat(row.querySelector('input[name$="total_discount"]')?.value) || 0;
@@ -849,14 +775,12 @@
         }
     });
 
-    // Wait for all AJAX calls to complete before calculating order totals
     Promise.all(initPromises)
         .then(() => {
             updateOrderTotals();
         })
         .catch(error => {
             console.error('Error initializing product details:', error);
-            // Still update totals even if some requests failed
             updateOrderTotals();
         });
 
@@ -874,23 +798,20 @@
     }
 
     function validateRow(row) {
-        if (row.style.display === 'none') return true; // Skip hidden/deleted rows
+        if (row.style.display === 'none') return true;
         
         const product = row.querySelector('select[name$="product"]');
         const quantity = row.querySelector('input[name$="quantity"]');
         const unitPrice = row.querySelector('input[name$="unit_price"]');
         
-        // If row is completely empty, it's valid (will be removed before submission)
         if (!product.value && !quantity.value && !unitPrice.value) {
             return true;
         }
         
-        // If row has any value, all required fields must be filled
         if (!product.value || !quantity.value || !unitPrice.value) {
             return false;
         }
         
-        // Validate UUID only if product is selected
         if (product.value && !isValidUUID(product.value)) {
             return false;
         }
@@ -899,9 +820,6 @@
     }
 
     document.querySelector('form').addEventListener('submit', async function(e) {
-        // e.submitter is the button that triggered this submit - programmatic
-        // this.submit() below loses it otherwise, so the server would never
-        // see which button (Save as Draft vs Confirm Order) was clicked.
         const submitter = e.submitter;
         const clickedAction = submitter && submitter.name === 'action' ? submitter.value : null;
         e.preventDefault();
@@ -918,7 +836,7 @@
         let allRowsValid = true;
 
         rows.forEach(row => {
-            if (row.style.display !== 'none') { // Only check visible rows
+            if (row.style.display !== 'none') {
                 if (!isRowEmpty(row)) {
                     hasValidData = true;
                     if (!validateRow(row)) {
@@ -957,7 +875,6 @@
         
         rows.forEach(row => {
             if (isRowEmpty(row)) {
-                // Delete row without updating totals yet (to avoid multiple updates)
                 const deleteCheckbox = row.querySelector('input[name$="-DELETE"]');
                 if (deleteCheckbox) {
                     deleteCheckbox.checked = true;
@@ -971,7 +888,7 @@
         
         if (rowsDeleted) {
             updateFormsetIndexes();
-            updateOrderTotals(); // Update totals once after all deletions
+            updateOrderTotals();
         }
     }
 });
