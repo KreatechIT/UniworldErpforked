@@ -15,14 +15,6 @@ from django.db.models.functions import Lower
 from uniworlderp.models import ARInvoice, Payment, CustomerVendor, SalesEmployee
 
 
-def counted_invoices():
-    return ARInvoice.objects.filter(invoice_date__gte=settings.FINANCE_GO_LIVE_DATE)
-
-
-def counted_payments():
-    return Payment.objects.filter(payment_date__gte=settings.FINANCE_GO_LIVE_DATE)
-
-
 def employee_scoped(invoices, payments, sales_employee_id):
     """Employee = who recorded the invoice / payment."""
     if sales_employee_id:
@@ -36,8 +28,8 @@ def customers_for_employee(sales_employee_id):
     if sales_employee_id:
         customers = customers.filter(
             Q(sales_employee_id=sales_employee_id)
-            | Q(id__in=counted_invoices().filter(sales_employee_id=sales_employee_id).values('customer'))
-            | Q(id__in=counted_payments().filter(sales_employee_id=sales_employee_id).values('customer'))
+            | Q(id__in=ARInvoice.objects.filter(sales_employee_id=sales_employee_id).values('customer'))
+            | Q(id__in=Payment.objects.filter(sales_employee_id=sales_employee_id).values('customer'))
         )
     return customers
 
@@ -85,7 +77,7 @@ def build_customer_ledger(customer, start_date, end_date, search='', txn_type=''
     brought_forward = Decimal('0.00')
 
     invoices_before, payments_before = employee_scoped(
-        counted_invoices().filter(customer=customer), counted_payments().filter(customer=customer), sales_employee_id)
+        ARInvoice.objects.filter(customer=customer), Payment.objects.filter(customer=customer), sales_employee_id)
     if start_date:
         invoices_before = invoices_before.filter(invoice_date__lt=start_date)
         payments_before = payments_before.filter(payment_date__lt=start_date)
@@ -98,7 +90,7 @@ def build_customer_ledger(customer, start_date, end_date, search='', txn_type=''
     brought_forward = (customer.opening_balance if opening_applies(customer, sales_employee_id) else Decimal('0.00')) + invoiced_before - paid_before
 
     invoices, payments = employee_scoped(
-        counted_invoices().filter(customer=customer), counted_payments().filter(customer=customer), sales_employee_id)
+        ARInvoice.objects.filter(customer=customer), Payment.objects.filter(customer=customer), sales_employee_id)
     invoices = invoices.select_related('sales_order')
     payments = payments.select_related('invoice', 'method')
     if start_date:
@@ -186,7 +178,7 @@ def build_customers_summary(filters):
 
     start, end = filters['start_date'], filters['end_date']
     invoices, payments = employee_scoped(
-        counted_invoices().filter(customer__in=customers), counted_payments().filter(customer__in=customers), emp)
+        ARInvoice.objects.filter(customer__in=customers), Payment.objects.filter(customer__in=customers), emp)
 
     def totals(qs, amount):
         return {r['customer']: r['t'] or Decimal('0.00')
@@ -279,7 +271,7 @@ class LedgerView(LoginRequiredMixin, View):
             context['collected_total'] = ledger['total_credit']
             context['brought_forward'] = ledger['brought_forward']
             context['outstanding_total'] = ledger['closing_balance']
-            overdue = counted_invoices().filter(
+            overdue = ARInvoice.objects.filter(
                 customer=customer,
             ).exclude(payment_status='C').filter(due_date__date__lt=timezone.localdate())
             if filters['sales_employee_id']:
@@ -292,7 +284,7 @@ class LedgerView(LoginRequiredMixin, View):
             context['invoiced_total'] = summary['invoiced']
             context['collected_total'] = summary['collected']
             context['outstanding_total'] = summary['outstanding']
-            context['overdue_count'] = counted_invoices().filter(
+            context['overdue_count'] = ARInvoice.objects.filter(
                 customer__in=summary['customers'],
             ).exclude(payment_status='C').filter(due_date__date__lt=timezone.localdate())
             if filters['sales_employee_id']:

@@ -238,6 +238,14 @@
                     </div>
                 </form>
 
+                {% if action == 'View' %}
+                <div class="flex justify-end mt-4">
+                    <a href="{% url 'customer_vendor:sales_order_print' object.pk %}" target="_blank"
+                       class="px-6 py-2 bg-purple-700 text-white rounded-lg hover:bg-purple-800">
+                        <i class="ri-printer-line mr-1"></i>Print Sales Order
+                    </a>
+                </div>
+                {% endif %}
                 {% if action == 'View' and object.status == 'draft' and perms.uniworlderp.change_salesorder %}
                 <form method="post" action="{% url 'customer_vendor:sales_order_confirm' object.pk %}" class="flex justify-end mt-4"
                       onsubmit="return appConfirmSubmit(event, this, 'You are confirming this sales order. An invoice will be created and the sales order will be locked. Continue?', {title: 'Confirm Sales Order', confirmText: 'Confirm Order'});">
